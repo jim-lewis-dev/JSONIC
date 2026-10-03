@@ -1,0 +1,6 @@
+/* These notes describe positions, not the identities of the values. */
+[
+    /* First choice. */ "local",
+    /* Second choice. */ "cache",
+    /* Third choice. */ "network" /* Last configured position. */
+]

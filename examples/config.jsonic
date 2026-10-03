@@ -1,0 +1,28 @@
+/* An annotated application configuration.
+   Capture this file before handing ordinary JSON to another program. */
+{
+    "service": "field-kit",
+    "endpoint": "https://example.com/api",
+    "literal_text": "These are data: // not a comment; /* not a comment */; ''' not a comment '''",
+
+    /* Operations may change the values while these notes remain in place. */
+    "retry": {
+        "attempts": 3 /* including the first attempt */,
+        "delay_seconds": 1.00E+01,
+        "enabled": true
+    },
+
+    "routes": [
+        /* Position zero: first route checked. */
+        { "path": "/health", "timeout_seconds": 2 },
+        /* Position one: next route checked, regardless of its value. */
+        { "path": "/jobs", "timeout_seconds": 30 }
+    ],
+
+    "labels": { "日本語": "こんにちは", "units": "µs" },
+    "path/with~characters": { "": "an empty key is legal" },
+    "empty_options": { /* nothing configured yet */ },
+    "empty_queue": [ ''' no queued work ''' ],
+    "escaped_text": "quote=\" slash=\/ backslash=\\ newline=\n"
+}
+// Configuration ends here.

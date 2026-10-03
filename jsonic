@@ -1,0 +1,882 @@
+#!/usr/bin/env python3
+"""Capture, strip, and restore JSON comments and whitespace.
+
+Default: capture into <base>.jsonic.style, replacing any previous capture.
+--strip: remove comments, keeping outside whitespace and all line endings.
+--raw / --mini / --minified: remove comments and outside whitespace.
+--apply [STYLE]: apply captured presentation; missing keys/indices are ignored.
+
+.json is strict JSON; .jsonic also permits //, /* */ and triple-quote comments.
+Data tokens are preserved byte for byte. See README.md for examples and rules.
+"""
+
+import argparse
+import json
+import os
+import stat
+import sys
+import tempfile
+
+WS_BYTES = b" \t\r\n"
+HEX = b"0123456789abcdefABCDEF"
+
+class JsonicError(Exception):
+    pass
+
+# Current parse context for better errors (JSON Pointer + offset).
+_CTX_PTR = None
+_CTX_SCANNER = None
+
+def set_context(*, scanner=None, ptr=None):
+    global _CTX_PTR, _CTX_SCANNER
+    if scanner is not None:
+        _CTX_SCANNER = scanner
+    if ptr is not None:
+        _CTX_PTR = ptr
+
+def fail(msg):
+    # Append ptr/offset when available and not already present in msg.
+    extra = []
+    if _CTX_PTR is not None and "ptr=" not in msg and "pointer" not in msg:
+        extra.append("ptr=%r" % (_CTX_PTR,))
+    if _CTX_SCANNER is not None and "offset" not in msg:
+        extra.append("offset=%d" % (_CTX_SCANNER.i,))
+    if extra:
+        msg = "%s [%s]" % (msg, ", ".join(extra))
+    raise JsonicError(msg)
+
+def _validate_style_comment_bytes(b):
+    # Valid content is: whitespace, or comments embedded in whitespace.
+    # Supported comments:
+    #   /* ... */
+    #   ''' ... '''
+    #   // ... \n   (newline optional at EOF)
+    n = len(b)
+    i = 0
+    while i < n:
+        c = b[i]
+        if c in WS_BYTES:
+            i += 1
+            continue
+
+        # /* ... */
+        if i + 1 < n and b[i] == ord("/") and b[i + 1] == ord("*"):
+            i += 2
+            j = b.find(b"*/", i)
+            if j < 0:
+                fail("Unterminated /* */ comment in metadata")
+            i = j + 2
+            continue
+
+        # ''' ... '''
+        if i + 2 < n and b[i] == ord("'") and b[i + 1] == ord("'") and b[i + 2] == ord("'"):
+            i += 3
+            j = b.find(b"'''", i)
+            if j < 0:
+                fail("Unterminated ''' ''' comment in metadata")
+            i = j + 3
+            continue
+
+        # // ... \n
+        if i + 1 < n and b[i] == ord("/") and b[i + 1] == ord("/"):
+            i += 2
+            # Consume until newline or EOF; include the newline if present.
+            while i < n and b[i] not in b"\r\n":
+                i += 1
+            if i < n and b[i] == ord("\n"):
+                i += 1
+            continue
+
+        fail("Metadata contains non-whitespace, non-comment byte: 0x%02x" % c)
+
+def style_bytes_to_str(b):
+    try:
+        return b.decode("utf-8")
+    except UnicodeDecodeError:
+        fail("Non-UTF-8 bytes encountered in whitespace/comment region")
+
+def style_str_to_bytes(s):
+    if s is None:
+        return b""
+    b = s.encode("utf-8")
+    _validate_style_comment_bytes(b)
+    return b
+
+def atomic_write_bytes(path, data):
+    # Robust, POSIX-friendly: write to temp file in same dir, fsync, then atomic replace.
+    # Follow an output symlink as an ordinary file write would.
+    path = os.path.realpath(path)
+    d = os.path.dirname(path) or "."
+    base = os.path.basename(path)
+    existing_mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else None
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=d,
+            prefix="." + base + ".tmp.",
+            delete=False,
+        ) as f:
+            tmp_path = f.name
+            f.write(data)
+            f.flush()
+            if existing_mode is not None:
+                os.fchmod(f.fileno(), existing_mode)
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, path)
+        tmp_path = None
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
+
+def json_pointer_escape(token):
+    # "~" -> "~0", "/" -> "~1"
+    return token.replace("~", "~0").replace("/", "~1")
+
+def json_pointer_join(parent, token):
+    if parent == "":
+        return "/" + json_pointer_escape(token)
+    return parent + "/" + json_pointer_escape(token)
+
+class Scanner:
+    def __init__(self, data, *, forbid_style=False, allow_comments=False, record_comments=False):
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise JsonicError("Input is not UTF-8 at byte %d" % e.start) from None
+        self.data = data
+        self.n = len(data)
+        self.i = 0
+        self.forbid_style = forbid_style
+        self.allow_comments = allow_comments
+        self.comments = [] if record_comments else None
+
+    def eof(self):
+        return self.i >= self.n
+
+    def peek(self):
+        if self.i >= self.n:
+            return None
+        return self.data[self.i]
+
+    def read_byte(self):
+        if self.i >= self.n:
+            fail("Unexpected EOF")
+        b = self.data[self.i]
+        self.i += 1
+        return b
+
+    def _read_block_comment(self):
+        # Assumes current position begins with "/*"
+        start = self.i
+        self.i += 2
+        j = self.data.find(b"*/", self.i)
+        if j < 0:
+            fail("Unterminated /* */ comment")
+        self.i = j + 2
+        return self.data[start:self.i]
+
+    def _read_triple_quote_comment(self):
+        # Assumes current position begins with "'''"
+        start = self.i
+        self.i += 3
+        j = self.data.find(b"'''", self.i)
+        if j < 0:
+            fail("Unterminated ''' ''' comment")
+        self.i = j + 3
+        return self.data[start:self.i]
+
+    def _read_line_comment(self):
+        # Assumes current position begins with "//"
+        start = self.i
+        self.i += 2
+        while self.i < self.n and self.data[self.i] not in b"\r\n":
+            self.i += 1
+        # The terminating newline belongs to ordinary whitespace.
+        return self.data[start:self.i]
+
+    def read_style(self):
+        start = self.i
+        while self.i < self.n:
+            c = self.data[self.i]
+            if c in WS_BYTES:
+                self.i += 1
+                continue
+
+            if self.allow_comments:
+                comment_start = self.i
+                if self.i + 1 < self.n and self.data[self.i] == ord("/") and self.data[self.i + 1] == ord("*"):
+                    self._read_block_comment()
+                elif self.i + 2 < self.n and self.data[self.i] == ord("'") and self.data[self.i + 1] == ord("'") and self.data[self.i + 2] == ord("'"):
+                    self._read_triple_quote_comment()
+                elif self.i + 1 < self.n and self.data[self.i] == ord("/") and self.data[self.i + 1] == ord("/"):
+                    self._read_line_comment()
+                else:
+                    break
+                if self.comments is not None:
+                    self.comments.append((comment_start, self.i))
+                continue
+
+            break
+
+        style = self.data[start:self.i]
+        if self.forbid_style and style:
+            fail("rawJSON contains whitespace/comments outside strings; expected fully stripped JSON")
+        return style
+
+    def expect(self, ch_byte):
+        b = self.read_byte()
+        if b != ch_byte:
+            fail("Expected %r but found %r at offset %d" % (chr(ch_byte), chr(b), self.i - 1))
+
+    def read_string_token(self):
+        # Returns raw bytes including surrounding quotes.
+        if self.peek() != ord('"'):
+            fail('Expected string starting with \'"\' at offset %d' % self.i)
+        start = self.i
+        self.i += 1  # opening quote
+        while True:
+            if self.i >= self.n:
+                fail("Unterminated string")
+            c = self.data[self.i]
+            self.i += 1
+            if c == ord('"'):
+                break
+            if c == ord("\\"):
+                if self.i >= self.n:
+                    fail("Unterminated escape sequence")
+                esc = self.data[self.i]
+                self.i += 1
+                if esc == ord("u"):
+                    if self.i + 4 > self.n:
+                        fail("Short \\u escape")
+                    for j in range(4):
+                        if self.data[self.i + j] not in HEX:
+                            fail("Invalid hex digit in \\u escape")
+                    self.i += 4
+                else:
+                    if esc not in b'"\\/bfnrt':
+                        fail("Invalid escape character: %r" % chr(esc))
+            else:
+                if c < 0x20:
+                    fail("Unescaped control character in string")
+        return self.data[start:self.i]
+
+    def read_number_token(self):
+        start = self.i
+        if self.peek() == ord("-"):
+            self.i += 1
+        if self.i >= self.n:
+            fail("Invalid number (EOF)")
+        c = self.data[self.i]
+        if c == ord("0"):
+            self.i += 1
+        elif ord("1") <= c <= ord("9"):
+            self.i += 1
+            while self.i < self.n and ord("0") <= self.data[self.i] <= ord("9"):
+                self.i += 1
+        else:
+            fail("Invalid number (bad integer part) at offset %d" % self.i)
+
+        if self.i < self.n and self.data[self.i] == ord("."):
+            self.i += 1
+            if self.i >= self.n or not (ord("0") <= self.data[self.i] <= ord("9")):
+                fail("Invalid number (fraction needs digits)")
+            while self.i < self.n and ord("0") <= self.data[self.i] <= ord("9"):
+                self.i += 1
+
+        if self.i < self.n and self.data[self.i] in (ord("e"), ord("E")):
+            self.i += 1
+            if self.i < self.n and self.data[self.i] in (ord("+"), ord("-")):
+                self.i += 1
+            if self.i >= self.n or not (ord("0") <= self.data[self.i] <= ord("9")):
+                fail("Invalid number (exponent needs digits)")
+            while self.i < self.n and ord("0") <= self.data[self.i] <= ord("9"):
+                self.i += 1
+
+        return self.data[start:self.i]
+
+    def read_literal_token(self):
+        if self.data.startswith(b"true", self.i):
+            self.i += 4
+            return b"true"
+        if self.data.startswith(b"false", self.i):
+            self.i += 5
+            return b"false"
+        if self.data.startswith(b"null", self.i):
+            self.i += 4
+            return b"null"
+        fail("Invalid literal at offset %d" % self.i)
+
+def decode_json_string_token(tok_bytes):
+    try:
+        return json.loads(tok_bytes.decode("utf-8"))
+    except Exception as e:
+        fail("Failed to decode JSON string token: %s" % str(e))
+
+def extract_value(scanner, ptr, raw_out, meta):
+    set_context(scanner=scanner, ptr=ptr)
+    c = scanner.peek()
+    if c is None:
+        fail("Unexpected EOF while parsing value")
+    if c == ord("{"):
+        extract_object(scanner, ptr, raw_out, meta)
+    elif c == ord("["):
+        extract_array(scanner, ptr, raw_out, meta)
+    elif c == ord('"'):
+        raw_out.append(scanner.read_string_token())
+    elif c == ord("-") or (ord("0") <= c <= ord("9")):
+        raw_out.append(scanner.read_number_token())
+    elif c in (ord("t"), ord("f"), ord("n")):
+        raw_out.append(scanner.read_literal_token())
+    else:
+        fail("Unexpected value byte %r at offset %d" % (chr(c), scanner.i))
+
+def extract_object(scanner, ptr, raw_out, meta):
+    scanner.expect(ord("{"))
+    raw_out.append(b"{")
+
+    style = scanner.read_style()
+    if scanner.peek() == ord("}"):
+        scanner.expect(ord("}"))
+        raw_out.append(b"}")
+        empty_style = style_bytes_to_str(style)
+        if empty_style:
+            meta["objects"][ptr] = {"empty_inside_style": empty_style}
+        return
+
+    members = {}
+    seen = set()
+
+    while True:
+        set_context(scanner=scanner, ptr=ptr)
+        if scanner.peek() != ord('"'):
+            fail("Expected object key string at offset %d" % scanner.i)
+
+        key_tok = scanner.read_string_token()
+        raw_out.append(key_tok)
+        key = decode_json_string_token(key_tok)
+        if not isinstance(key, str):
+            fail("Object key did not decode to string")
+        if key in seen:
+            fail("Duplicate key %r at object pointer %r" % (key, ptr))
+        seen.add(key)
+
+        c1 = style_bytes_to_str(style)
+
+        child_ptr = json_pointer_join(ptr, key)
+        set_context(scanner=scanner, ptr=child_ptr)
+
+        style = scanner.read_style()
+        if scanner.peek() != ord(":"):
+            fail("Expected ':' after object key at offset %d" % scanner.i)
+        c2 = style_bytes_to_str(style)
+        scanner.expect(ord(":"))
+        raw_out.append(b":")
+
+        style = scanner.read_style()
+        c3 = style_bytes_to_str(style)
+
+        extract_value(scanner, child_ptr, raw_out, meta)
+
+        style = scanner.read_style()
+        c4 = style_bytes_to_str(style)
+
+        m = {}
+        if c1:
+            m["c1"] = c1
+        if c2:
+            m["c2"] = c2
+        if c3:
+            m["c3"] = c3
+        if c4:
+            m["c4"] = c4
+        if m:
+            members[key] = m
+
+        set_context(scanner=scanner, ptr=ptr)
+        delim = scanner.peek()
+        if delim == ord(","):
+            scanner.expect(ord(","))
+            raw_out.append(b",")
+            style = scanner.read_style()
+            continue
+        if delim == ord("}"):
+            scanner.expect(ord("}"))
+            raw_out.append(b"}")
+            break
+        fail("Expected ',' or '}' after object member at offset %d" % scanner.i)
+
+    if members:
+        meta["objects"][ptr] = {"members": members}
+
+def extract_array(scanner, ptr, raw_out, meta):
+    scanner.expect(ord("["))
+    raw_out.append(b"[")
+
+    style = scanner.read_style()
+    if scanner.peek() == ord("]"):
+        scanner.expect(ord("]"))
+        raw_out.append(b"]")
+        empty_style = style_bytes_to_str(style)
+        if empty_style:
+            meta["arrays"][ptr] = {"empty_inside_style": empty_style}
+        return
+
+    before = {}
+    after = {}
+    i = 0
+
+    while True:
+        bstyle = style_bytes_to_str(style)
+        if bstyle:
+            before[str(i)] = bstyle
+
+        child_ptr = json_pointer_join(ptr, str(i))
+        extract_value(scanner, child_ptr, raw_out, meta)
+
+        style = scanner.read_style()
+        astyle = style_bytes_to_str(style)
+        if astyle:
+            after[str(i)] = astyle
+        set_context(scanner=scanner, ptr=ptr)
+        delim = scanner.peek()
+        if delim == ord(","):
+            scanner.expect(ord(","))
+            raw_out.append(b",")
+            style = scanner.read_style()
+            i += 1
+            continue
+        if delim == ord("]"):
+            scanner.expect(ord("]"))
+            raw_out.append(b"]")
+            i += 1
+            break
+        fail("Expected ',' or ']' after array element at offset %d" % scanner.i)
+
+    if before or after:
+        rec = {}
+        if before:
+            rec["before"] = before
+        if after:
+            rec["after"] = after
+        meta["arrays"][ptr] = rec
+
+def restore_value(scanner, ptr, out, meta):
+    set_context(scanner=scanner, ptr=ptr)
+    c = scanner.peek()
+    if c is None:
+        fail("Unexpected EOF while parsing value")
+    if c == ord("{"):
+        restore_object(scanner, ptr, out, meta)
+    elif c == ord("["):
+        restore_array(scanner, ptr, out, meta)
+    elif c == ord('"'):
+        out.append(scanner.read_string_token())
+    elif c == ord("-") or (ord("0") <= c <= ord("9")):
+        out.append(scanner.read_number_token())
+    elif c in (ord("t"), ord("f"), ord("n")):
+        out.append(scanner.read_literal_token())
+    else:
+        fail("Unexpected value byte %r at offset %d" % (chr(c), scanner.i))
+
+def restore_object(scanner, ptr, out, meta):
+    obj_meta = meta.get("objects", {}).get(ptr, {})
+    members_meta = obj_meta.get("members", {})
+
+    scanner.expect(ord("{"))
+    out.append(b"{")
+
+    if scanner.peek() == ord("}"):
+        scanner.expect(ord("}"))
+        out.append(style_str_to_bytes(obj_meta.get("empty_inside_style", "")))
+        out.append(b"}")
+        return
+
+    seen = set()
+    while True:
+        set_context(scanner=scanner, ptr=ptr)
+        key_tok = scanner.read_string_token()
+        key = decode_json_string_token(key_tok)
+        if key in seen:
+            fail("Duplicate key %r in rawJSON at %r" % (key, ptr))
+        seen.add(key)
+
+        # If a key has no entry in metadata, assume no whitespace.
+        m = members_meta.get(key, {})
+
+        out.append(style_str_to_bytes(m.get("c1", "")))
+        out.append(key_tok)
+        out.append(style_str_to_bytes(m.get("c2", "")))
+
+        child_ptr = json_pointer_join(ptr, key)
+        set_context(scanner=scanner, ptr=child_ptr)
+
+        if scanner.peek() != ord(":"):
+            fail("Expected ':' after key in rawJSON at offset %d" % scanner.i)
+        scanner.expect(ord(":"))
+        out.append(b":")
+        out.append(style_str_to_bytes(m.get("c3", "")))
+
+        restore_value(scanner, child_ptr, out, meta)
+        out.append(style_str_to_bytes(m.get("c4", "")))
+
+        set_context(scanner=scanner, ptr=ptr)
+        delim = scanner.peek()
+        if delim == ord(","):
+            scanner.expect(ord(","))
+            out.append(b",")
+            continue
+        if delim == ord("}"):
+            scanner.expect(ord("}"))
+            out.append(b"}")
+            break
+        fail("Expected ',' or '}' in rawJSON at offset %d" % scanner.i)
+
+def restore_array(scanner, ptr, out, meta):
+    arr_meta = meta.get("arrays", {}).get(ptr, {})
+
+    scanner.expect(ord("["))
+    out.append(b"[")
+
+    set_context(scanner=scanner, ptr=ptr)
+    if scanner.peek() == ord("]"):
+        scanner.expect(ord("]"))
+        out.append(style_str_to_bytes(arr_meta.get("empty_inside_style", "")))
+        out.append(b"]")
+        return
+
+    before = arr_meta.get("before", {})
+    after = arr_meta.get("after", {})
+
+    if not isinstance(before, dict):
+        fail("Array metadata 'before' must be object at %r" % ptr)
+    if not isinstance(after, dict):
+        fail("Array metadata 'after' must be object at %r" % ptr)
+
+    i = 0
+    while True:
+        # BEFORE spacing is purely index-based. If the style has no entry for
+        # this index, do not add any whitespace/comments.
+        out.append(style_str_to_bytes(before.get(str(i), "")))
+
+        # Nested styling uses the real index (no clamping). If the style has no
+        # metadata for this element pointer, it naturally restores as raw/minified.
+        child_ptr = json_pointer_join(ptr, str(i))
+        restore_value(scanner, child_ptr, out, meta)
+        out.append(style_str_to_bytes(after.get(str(i), "")))
+
+        set_context(scanner=scanner, ptr=ptr)
+        delim = scanner.peek()
+        if delim == ord(","):
+            scanner.expect(ord(","))
+            out.append(b",")
+            i += 1
+            continue
+
+        if delim == ord("]"):
+            scanner.expect(ord("]"))
+            out.append(b"]")
+            break
+
+        fail("Expected ',' or ']' in rawJSON at offset %d" % scanner.i)
+
+def strip_value(scanner, out, ptr):
+    set_context(scanner=scanner, ptr=ptr)
+    c = scanner.peek()
+    if c is None:
+        fail("Unexpected EOF while parsing value")
+    if c == ord("{"):
+        strip_object(scanner, out, ptr)
+    elif c == ord("["):
+        strip_array(scanner, out, ptr)
+    elif c == ord('"'):
+        out.append(scanner.read_string_token())
+    elif c == ord("-") or (ord("0") <= c <= ord("9")):
+        out.append(scanner.read_number_token())
+    elif c in (ord("t"), ord("f"), ord("n")):
+        out.append(scanner.read_literal_token())
+    else:
+        fail("Unexpected value byte %r at offset %d" % (chr(c), scanner.i))
+
+def strip_object(scanner, out, ptr):
+    scanner.expect(ord("{"))
+    out.append(b"{")
+
+    scanner.read_style()
+    if scanner.peek() == ord("}"):
+        scanner.expect(ord("}"))
+        out.append(b"}")
+        return
+
+    seen = set()
+    while True:
+        set_context(scanner=scanner, ptr=ptr)
+        if scanner.peek() != ord('"'):
+            fail("Expected object key string at offset %d" % scanner.i)
+
+        key_tok = scanner.read_string_token()
+        out.append(key_tok)
+        key = decode_json_string_token(key_tok)
+        if key in seen:
+            fail("Duplicate key %r at object pointer %r" % (key, ptr))
+        seen.add(key)
+
+        child_ptr = json_pointer_join(ptr, key)
+        set_context(scanner=scanner, ptr=child_ptr)
+
+        scanner.read_style()
+        if scanner.peek() != ord(":"):
+            fail("Expected ':' after object key at offset %d" % scanner.i)
+        scanner.expect(ord(":"))
+        out.append(b":")
+
+        scanner.read_style()
+        strip_value(scanner, out, child_ptr)
+
+        scanner.read_style()
+        set_context(scanner=scanner, ptr=ptr)
+        delim = scanner.peek()
+        if delim == ord(","):
+            scanner.expect(ord(","))
+            out.append(b",")
+            scanner.read_style()
+            continue
+        if delim == ord("}"):
+            scanner.expect(ord("}"))
+            out.append(b"}")
+            break
+        fail("Expected ',' or '}' after object member at offset %d" % scanner.i)
+
+def strip_array(scanner, out, ptr):
+    scanner.expect(ord("["))
+    out.append(b"[")
+
+    scanner.read_style()
+    if scanner.peek() == ord("]"):
+        scanner.expect(ord("]"))
+        out.append(b"]")
+        return
+
+    i = 0
+    while True:
+        child_ptr = json_pointer_join(ptr, str(i))
+        strip_value(scanner, out, child_ptr)
+
+        scanner.read_style()
+        set_context(scanner=scanner, ptr=ptr)
+        delim = scanner.peek()
+        if delim == ord(","):
+            scanner.expect(ord(","))
+            out.append(b",")
+            scanner.read_style()
+            i += 1
+            continue
+        if delim == ord("]"):
+            scanner.expect(ord("]"))
+            out.append(b"]")
+            break
+        fail("Expected ',' or ']' after array element at offset %d" % scanner.i)
+
+def strip_document(data, *, allow_comments, preserve_whitespace=False):
+    s = Scanner(data, allow_comments=allow_comments, record_comments=preserve_whitespace)
+    set_context(scanner=s, ptr="")
+    s.read_style()
+    out = []
+    set_context(scanner=s, ptr="")
+    strip_value(s, out, "")
+    set_context(ptr="")  # root context for trailing-garbage errors
+
+    s.read_style()
+    if not s.eof():
+        fail("Trailing non-whitespace bytes after root value at offset %d" % s.i)
+    if not preserve_whitespace:
+        return b"".join(out)
+
+    # Remove comment spans without touching strings or outside whitespace.
+    # Keep embedded newlines so block-comment removal retains line numbers.
+    kept = []
+    cursor = 0
+    for start, end in s.comments:
+        kept.append(data[cursor:start])
+        kept.append(bytes(c for c in data[start:end] if c in b"\r\n"))
+        cursor = end
+    kept.append(data[cursor:])
+    return b"".join(kept)
+
+def _input_info(input_path):
+    # Extension selects the accepted syntax; the flags select the operation.
+    root, ext = os.path.splitext(input_path)
+    ext = ext.lower()
+    if ext not in (".json", ".jsonic"):
+        fail("Input must have .json or .jsonic extension: %r" % input_path)
+
+    d = os.path.dirname(input_path)
+    if d == "":
+        d = "."
+    base = os.path.basename(root)  # filename without extension
+    meta_default = os.path.join(d, base + ".jsonic.style")
+    return root, ext, meta_default
+
+def cmd_capture(in_path, meta_out_path, *, allow_comments):
+    if same_path(in_path, meta_out_path):
+        raise JsonicError("Capture output must differ from the input data file")
+    with open(in_path, "rb") as f:
+        data = f.read()
+
+    scanner = Scanner(data, forbid_style=False, allow_comments=allow_comments)
+    set_context(scanner=scanner, ptr="")
+    meta = {
+        "objects": {},
+        "arrays": {},
+    }
+
+    prefix = style_bytes_to_str(scanner.read_style())
+    raw_out = []
+    extract_value(scanner, "", raw_out, meta)
+    suffix = style_bytes_to_str(scanner.read_style())
+    set_context(ptr="")  # root context for trailing-garbage errors
+
+    if not scanner.eof():
+        fail("Trailing non-whitespace bytes after root value at offset %d" % scanner.i)
+
+    if prefix:
+        meta["root_prefix_style"] = prefix
+    if suffix:
+        meta["root_suffix_style"] = suffix
+
+    if not meta["objects"]:
+        meta.pop("objects", None)
+    if not meta["arrays"]:
+        meta.pop("arrays", None)
+
+    # An empty capture is {}, and must replace any previous style.
+    atomic_write_bytes(
+        meta_out_path,
+        json.dumps(meta, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("utf-8") + b"\n",
+    )
+
+def cmd_apply_to_bytes(in_path, meta_in_path, *, allow_comments):
+    with open(in_path, "rb") as f:
+        raw_in = f.read()
+    raw = strip_document(raw_in, allow_comments=allow_comments)
+
+    with open(meta_in_path, "rb") as f:
+        data = f.read()
+    # Style files are JSON too. Use the same strict input rules.
+    strip_document(data, allow_comments=False)
+    meta = json.loads(data)
+    if not isinstance(meta, dict):
+        raise JsonicError("Style file must contain a JSON object")
+
+    scanner = Scanner(raw, forbid_style=True, allow_comments=False)
+    set_context(scanner=scanner, ptr="")
+    scanner.read_style()  # errors if any
+    out = []
+    out.append(style_str_to_bytes(meta.get("root_prefix_style", "")))
+    restore_value(scanner, "", out, meta)
+    out.append(style_str_to_bytes(meta.get("root_suffix_style", "")))
+    set_context(ptr="")  # root context for post-root whitespace / trailing bytes
+    scanner.read_style()  # errors if any
+
+    if not scanner.eof():
+        fail("Trailing bytes after root value in rawJSON at offset %d" % scanner.i)
+
+    restored = b"".join(out)
+    # A successful restore must still be a valid JSONIC document.
+    strip_document(restored, allow_comments=True)
+    return restored
+
+
+def same_path(a, b):
+    if os.path.realpath(a) == os.path.realpath(b):
+        return True
+    return os.path.exists(a) and os.path.exists(b) and os.path.samefile(a, b)
+
+def main(argv):
+    ap = argparse.ArgumentParser(
+        add_help=True,
+        prog="jsonic",
+        usage=(
+            "\n\t%(prog)s input [-o OUTPUT.jsonic.style]\n"
+            "\t%(prog)s input --raw [-o OUTPUT.json]\n"
+            "\t%(prog)s input --strip [-o OUTPUT.json]\n"
+            "\t%(prog)s input --apply [STYLE.jsonic.style] [-o OUTPUT.jsonic]\n\n"
+        ),
+        description="Capture, strip, and restore JSON comments and whitespace.",
+        epilog="Input: .json (strict JSON) or .jsonic (JSON with comments). "
+               "Default capture always replaces <base>.jsonic.style, even when empty.",
+    )
+
+    mode = ap.add_mutually_exclusive_group(required=False)
+    mode.add_argument("--raw", "--mini", "--minified", dest="raw", action="store_true",
+                      help="emit raw JSON: remove comments and outside whitespace")
+    mode.add_argument("--strip", action="store_true",
+                      help="remove comments; preserve outside whitespace and all line endings")
+    mode.add_argument(
+        "--apply",
+        nargs="?",
+        const="",
+        metavar="STYLE.jsonic.style",
+        help="apply a .jsonic.style style to FILE.json or FILE.jsonic",
+    )
+    ap.add_argument("-o", dest="output", help="output path (mode-dependent); otherwise writes to stdout or default metadata JSON object")
+    ap.add_argument("input", help="input file (.json or .jsonic)")
+
+    # If invoked with no args (like "jsonic"), print the SAME help as "-h".
+    if not argv:
+        ap.print_help(sys.stderr)
+        return 2
+
+    args = ap.parse_args(argv)
+
+    try:
+        root, ext, meta_default = _input_info(args.input)
+        allow_comments = (ext == ".jsonic")
+
+        # RAW
+        if args.raw or args.strip:
+            with open(args.input, "rb") as f:
+                raw_in = f.read()
+            raw = strip_document(raw_in, allow_comments=allow_comments,
+                                 preserve_whitespace=args.strip)
+
+            if args.output:
+                atomic_write_bytes(args.output, raw)
+            else:
+                sys.stdout.buffer.write(raw)
+            return 0
+
+        # APPLY
+        if args.apply is not None:
+            meta_in = args.apply if args.apply != "" else meta_default
+            if not os.path.exists(meta_in):
+                raise JsonicError("Style file not found: %r" % meta_in)
+            if args.output and same_path(args.output, meta_in):
+                raise JsonicError("Apply output must differ from the style file")
+            out_bytes = cmd_apply_to_bytes(args.input, meta_in, allow_comments=allow_comments)
+            if args.output:
+                atomic_write_bytes(args.output, out_bytes)
+            else:
+                sys.stdout.buffer.write(out_bytes)
+            return 0
+
+        # CAPTURE (default)
+        meta_out = args.output if args.output else meta_default
+        cmd_capture(args.input, meta_out, allow_comments=allow_comments)
+        return 0
+
+    except RecursionError:
+        sys.stderr.write("jsonic: error: JSON nesting is too deep\n")
+        return 2
+    except (JsonicError, OSError, UnicodeError, ValueError, TypeError, AttributeError) as e:
+        sys.stderr.write("jsonic: error: %s\n" % str(e))
+        return 2
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
