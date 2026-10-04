@@ -121,7 +121,8 @@ def atomic_write_bytes(path, data):
             tmp_path = f.name
             f.write(data)
             f.flush()
-            if existing_mode is not None:
+            # Preserve POSIX permission bits where supported; Windows has no fchmod.
+            if existing_mode is not None and hasattr(os, "fchmod"):
                 os.fchmod(f.fileno(), existing_mode)
             os.fsync(f.fileno())
 

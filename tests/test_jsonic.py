@@ -2,6 +2,7 @@
 import importlib.machinery
 import importlib.util
 import json
+import os
 from pathlib import Path
 import random
 import stat
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -283,16 +285,33 @@ class JsonicTests(unittest.TestCase):
     def test_in_place_operations_preserve_mode_and_restore_capture(self):
         original = b'/*header*/{\n "x": 1 /*tail*/\n}\n'
         path = self.file("in-place.jsonic", original)
-        path.chmod(0o640)
+        if os.name == "posix":
+            path.chmod(0o640)
         self.assert_ok(self.cli(path))
         self.assert_ok(self.cli(path, "--strip", "-o", path))
         self.assertEqual(json.loads(path.read_bytes()), {"x": 1})
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
         self.assert_ok(self.cli(path, "--raw", "-o", path))
         self.assertEqual(path.read_bytes(), b'{"x":1}')
         self.assert_ok(self.cli(path, "--apply", "-o", path))
         self.assertEqual(path.read_bytes(), original)
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+
+    def test_recapture_and_in_place_writes_without_fchmod(self):
+        original = b'/*header*/{ "x": 1 }\n'
+        path = self.file("portable.jsonic", original)
+        # Exercise the missing API locally; this is not a native Windows run.
+        with patch.object(jsonic, "os", wraps=os) as platform_os:
+            del platform_os.fchmod
+            self.assertFalse(hasattr(platform_os, "fchmod"))
+            for operation in ([], [], ["--strip"], ["--raw"], ["--apply"]):
+                args = [str(path), *operation]
+                if operation:
+                    args += ["-o", str(path)]
+                self.assertEqual(jsonic.main(args), 0)
+            self.assertEqual(path.read_bytes(), original)
 
     def test_capture_cannot_replace_its_input(self):
         original = b'{ "x": 1 }'
@@ -300,6 +319,7 @@ class JsonicTests(unittest.TestCase):
         self.assert_error(self.cli(path, "-o", path))
         self.assertEqual(path.read_bytes(), original)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX permissions and symlinks")
     def test_output_symlink_is_followed_without_losing_permissions(self):
         path = self.file("input.json", b'{ "x": 1 }')
         target = self.file("target.json", b"old")

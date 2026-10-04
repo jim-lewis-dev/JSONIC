@@ -1,112 +1,144 @@
-# JSONIC - Java Script Object Notation with Integrated Comments
+# JSONIC
 
-Strip comments from JSON, use the data, and restore its comments and formatting.
-One executable, using the Python standard library.
+**Write comments beside your JSON. Use ordinary JSON tools. Bring the comments back.**
 
-```bash
-./jsonic settings.jsonic                           # capture presentation
-./jsonic settings.jsonic --strip -o settings.json   # JSON, keeping whitespace
-./jsonic settings.jsonic --raw -o settings.json     # raw JSON
-./jsonic settings.json --apply -o restored.jsonic   # restore presentation
+JSONIC saves comments and formatting separately from the data. Your existing
+program can read and update normal JSON; JSONIC then puts the saved presentation
+around the updated values. One Python executable. No third-party dependencies.
+
+## See it work
+
+Write `settings.jsonic`:
+
+```jsonc
+{
+  // Total attempts, including the first request.
+  "attempts": 3,
+  "enabled": true
+}
 ```
 
-`--raw`, `--mini`, and `--minified` are identical. Use `--help` for the CLI.
-You can also run the executable as `python3 jsonic`.
+Capture its presentation, then produce ordinary JSON:
 
-## Files and operations
+```bash
+python3 jsonic settings.jsonic
+python3 jsonic settings.jsonic --raw -o settings.json
+```
 
-| Input / operation | Behavior |
+The first command creates `settings.jsonic.style`, a companion file containing
+the comments, whitespace, and where they belong. The second produces:
+
+```json
+{"attempts":3,"enabled":true}
+```
+
+Let any JSON tool change `attempts` to `5` in `settings.json`. Then restore:
+
+```bash
+python3 jsonic settings.json --apply -o restored.jsonic
+```
+
+```jsonc
+{
+  // Total attempts, including the first request.
+  "attempts": 5,
+  "enabled": true
+}
+```
+
+**The new data stays. The saved comments and formatting return.**
+Without changes to the data tokens, the complete file returns byte for byte.
+
+## Try it now
+
+From the downloaded project directory:
+
+```bash
+python3 examples/demo.py
+```
+
+The demo performs a real JSON edit, shows the restored result, demonstrates a
+shortened array, and checks exact restoration of the complex example. It uses
+temporary files and leaves the examples untouched. On Windows, use `py` in
+place of `python3`.
+
+[Install on Ubuntu, macOS, or Windows](INSTALL.md).
+
+## Everyday commands
+
+With the command installed on Ubuntu or macOS, use the commands below.
+Otherwise run `python3 jsonic ...`, or `py jsonic ...` on Windows.
+
+| Command | Result |
 | --- | --- |
-| `.json` input | Strict UTF-8 JSON with unique object keys; comments are rejected. |
-| `.jsonic` input | The same JSON tokens, with optional `//`, `/* ... */`, or `''' ... '''` comments between tokens. |
-| No operation flag | Capture comments and whitespace into `<base>.jsonic.style`. |
-| `--strip` | Remove comments; keep outside-comment whitespace and all line endings, including line endings inside block comments. |
-| `--raw`, `--mini`, `--minified` | Remove comments and all whitespace outside strings. |
-| `--apply [STYLE]` | Strip the input's presentation and restore the captured style. Default: `<base>.jsonic.style`. |
-| `-o PATH` | Write to PATH. In capture mode, PATH receives the style; other modes write their result. |
+| `jsonic settings.jsonic` | Save presentation to `settings.jsonic.style`. |
+| `jsonic settings.jsonic --strip` | Remove comments, keeping surrounding whitespace and line endings. |
+| `jsonic settings.jsonic --raw` | Remove comments and all whitespace outside strings. |
+| `jsonic settings.json --apply` | Restore presentation from `settings.jsonic.style`. |
+| `jsonic settings.json --apply other.style` | Restore from an explicitly chosen style file. |
 
-Capture always replaces the previous style. Capturing fully raw JSON writes
-`{}`, so comments removed before recapture do not come back. Capture never
-writes a data file. Strip, raw, and apply go to stdout unless `-o` is given;
-they do not update the style file.
+`--mini` and `--minified` are aliases for `--raw`. Add `-o PATH` to write a
+result; strip, raw, and apply otherwise write to the terminal. In capture mode,
+`-o` chooses the style file. Capture must happen **before** comments are removed.
 
-Style files contain presentation only: gaps before/after tokens, keyed by
-object names and array positions. There are no release or schema identifiers,
-and no compatibility modes. Generate styles with this executable.
+## Predictable restoration
 
-## Restoration rules
-
-- Object-member styling follows the key at its current object path.
-- Array-element styling follows the index, regardless of the value there.
-- Missing keys and positions are ignored. Their comments are not relocated.
-- New keys and positions without captured styling receive no invented style.
-- Nested styling follows the same key/index path rules.
-- Leading/trailing document presentation is restored. Presentation inside an
-  empty container is restored when that container is still empty.
-
-An array example:
+- **Object comments follow keys** within the same object path.
+- **Array comments follow positions**, even when the values change or reorder.
+- Missing keys or positions do not receive comments. Their comments are not moved.
+- New keys or positions have no saved presentation; JSONIC invents none.
+- Capturing again replaces the saved presentation, including an empty capture.
 
 ```text
-Capture:  [/* first */10,/* second */20]
-Apply to: [99,88,77]
-Result:   [/* first */99,/* second */88,77]
+Captured: [/* first */10,/* second */20]
+New data: [99,88,77]
+Restored: [/* first */99,/* second */88,77]
 
-Apply to: [99]
-Result:   [/* first */99]
+New data: [99]
+Restored: [/* first */99]
 ```
 
-Spacing and comments after the former last item also belong to that index;
-they stay there if more items are added. There is no special array-tail rule.
-For objects, text after a comma is before the next key, so it follows that key.
+JSONIC preserves token spellings such as `1.00E+03` and `"\u0061"`. It does not
+undo changes another program makes to those spellings, infer comment meaning,
+or pretty-print new entries. [Exact rules and design](docs/design.md).
 
-An unchanged token stream restores byte for byte. Changed values keep their
-new token spellings and receive the captured gaps. This is not a pretty
-printer: it does not guess indentation, associate comments with values,
-recreate removed values, or undo token changes made by another program.
+## Valid input, clear failures
 
-## Try the examples
+`.json` accepts UTF-8 JSON with unique object keys. `.jsonic` accepts the same
+syntax plus `//`, `/* ... */`, and `''' ... '''` comments between tokens.
+Strings containing comment markers remain data.
 
-These commands use a temporary directory for every generated file:
+Invalid syntax, trailing commas, duplicate keys, and invalid UTF-8 produce a
+clear error and a nonzero exit. Invalid input leaves an existing output file
+unchanged. Use `-o` for in-place operations; do not redirect the shell back into
+the input file. Keep the annotated source or its style file for restoration.
 
-```bash
-jsonic_demo_dir="$(mktemp -d)"
-./jsonic examples/config.jsonic -o "$jsonic_demo_dir/config.jsonic.style"
-./jsonic examples/config.jsonic --strip -o "$jsonic_demo_dir/config.json"
-./jsonic "$jsonic_demo_dir/config.json" --apply -o "$jsonic_demo_dir/restored.jsonic"
-cmp examples/config.jsonic "$jsonic_demo_dir/restored.jsonic"
+## Examples and tests
 
-./jsonic examples/priority-array.jsonic -o "$jsonic_demo_dir/array.jsonic.style"
-printf '["disk","cache"]' > "$jsonic_demo_dir/array.json"
-./jsonic "$jsonic_demo_dir/array.json" --apply
-```
-
-`config.jsonic` includes nested settings, Unicode, escaped strings, comment
-delimiters inside strings, numeric spellings, unusual keys, and empty
-containers. `priority-array.jsonic` makes the positional behavior visible.
-
-## Errors and writes
-
-Invalid syntax, trailing commas, duplicate keys, invalid UTF-8, missing files,
-and file-write failures produce `jsonic: error: ...` on stderr and a nonzero
-exit. No partial data is emitted. Invalid input leaves an existing `-o` file
-unchanged. Excessive nesting is reported as an error.
-
-Use `-o` for in-place raw, strip, or apply operations; output is fully computed
-before replacement. Capture cannot overwrite its input, and apply cannot
-overwrite its style. Existing output permission bits are preserved.
-
-Keep the original annotated file or its captured style if you need its
-comments later. Avoid shell redirection back into the input file: the shell
-would truncate it before JSONIC can read it.
-
-## Tests
+| Example | What it shows |
+| --- | --- |
+| [settings.jsonic](examples/settings.jsonic) | A small, useful configuration with an explanatory comment. |
+| [priority-array.jsonic](examples/priority-array.jsonic) | Comments describing first, second, and third positions. |
+| [config.jsonic](examples/config.jsonic) | Nested settings, routes, Unicode, escaped strings, exact number spellings, and empty containers. |
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-The suite covers exact round trips, fixed expected raw/stripped output,
-changed values, reordered/growing/shrinking/empty arrays, missing object keys,
-all comment forms, UTF-8 and line endings, lexical precision, generated
-documents, CLI aliases, clean errors, empty recapture, and safe file writes.
-The retained comprehensive raw fixture is a fixed expected output.
+Tests cover exact bytes, changed values, structural edits, all comment forms,
+clean failures, file replacement, 300 generated documents, and a thousand
+commented records. Linux execution is verified; native macOS and Windows runs
+remain to be verified.
+
+## Where it fits
+
+Use JSONIC when humans maintain annotated configuration and existing software
+expects ordinary JSON. Its separate style file carries presentation through
+that workflow without changing the consuming program.
+
+Other projects also preserve comments. JSONIC's focus is **capture → process
+ordinary JSON → restore**, with explicit key and position rules.
+[Detailed comparison with Hjson and comment-json](docs/comparison.md).
+
+[What changed and the permission tradeoffs](docs/changes.md) ·
+[Apply and commit a downloaded update](docs/updates.md).

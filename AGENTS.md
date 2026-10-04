@@ -3,6 +3,12 @@
 - Maintain one current implementation. Do not add release numbers, numbered
   filenames, schema identifiers, migration code, or compatibility modes.
 - Keep Git local. Do not add a remote or push anything.
+- Deliver requested changes as JSONIC.zip with complete replacement files and
+  update.json containing a plainspoken commit message and explicit removals.
+  No numbered archive names. The user's jsonic-update command applies it to
+  ~/projects/dont_fucking_waste_my_time_JSONIC, commits locally, and removes the
+  download after success. The user tests after the commit. Preserve unrelated
+  files and do not add backups or automatically stash/reset local work.
 - Preserve the existing byte-oriented parser and exact data-token spellings.
   Do not introduce third-party dependencies or a second processing pipeline.
 - Array styling is strictly positional, exactly as object styling is keyed.
