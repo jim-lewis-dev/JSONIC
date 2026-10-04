@@ -46,6 +46,34 @@ python3 examples/demo.py
 
 Inspect the last change with `git show --stat` or `git show`. An identical
 already-applied ZIP is removed without creating an empty commit.
+Running the command again without a new download reports "No update waiting"
+and makes no changes. An explicitly named missing archive remains an error.
+
+## Share the current project
+
+Run this from any directory:
+
+```bash
+~/projects/dont_fucking_waste_my_time_JSONIC/jsonic-export
+```
+
+Attach `~/Downloads/JSONIC-snapshot.zip` to the conversation. It contains the
+current project files, including local edits, useful untracked files, and
+ignored configuration/style files. Its `project-state.json` records the branch,
+current commit, recent commit messages, status, staged/unstaged diffs, file modes,
+and file hashes. Git's internal directory, caches, and build/dependency outputs
+are excluded. Symlink targets are recorded without copying their contents.
+
+The exporter does not stage, commit, run tests, or alter project files. It
+replaces the previous snapshot. Project file contents are included, so inspect
+any private configuration before sharing. This is a review snapshot, not an
+update package; do not pass it to jsonic-update.
+
+For another repository or destination:
+
+```bash
+python3 jsonic-export --repo /path/to/project -o /path/to/JSONIC-snapshot.zip
+```
 
 ## What the updater changes
 

@@ -1,5 +1,9 @@
 """Exercise actual ZIP application and commits in disposable repositories."""
 
+import contextlib
+import importlib.machinery
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -9,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 
@@ -70,6 +75,28 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.git("rev-list", "--count", "HEAD"), "1")
         self.assertFalse(self.archive.exists())
+
+    def test_no_download_waiting_is_a_friendly_noop(self):
+        loader = importlib.machinery.SourceFileLoader("jsonic_update", str(UPDATER))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(module.Path, "home", return_value=self.work), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = module.main(["--repo", str(self.repo)])
+        self.assertEqual(result, 0)
+        self.assertIn("No update waiting", stdout.getvalue())
+        self.assertIn("Download JSONIC.zip", stdout.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "1")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_explicit_missing_archive_remains_an_error(self):
+        result = self.run_update()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("jsonic-update: error:", result.stderr)
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "1")
 
     def test_local_tracked_changes_are_not_overwritten(self):
         self.package()

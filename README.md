@@ -1,5 +1,7 @@
 # JSONIC
 
+**JavaScript Object Notation with Integrated Comments.**
+
 **Write comments beside your JSON. Use ordinary JSON tools. Bring the comments back.**
 
 JSONIC saves comments and formatting separately from the data. Your existing
@@ -142,3 +144,8 @@ ordinary JSON → restore**, with explicit key and position rules.
 
 [What changed and the permission tradeoffs](docs/changes.md) ·
 [Apply and commit a downloaded update](docs/updates.md).
+
+To share your project's actual files and Git state for review, run
+`python3 jsonic-export` from the project directory, then attach
+`~/Downloads/JSONIC-snapshot.zip`. The export includes local edits and useful
+untracked files without changing the repository. [Export details](docs/updates.md#share-the-current-project).

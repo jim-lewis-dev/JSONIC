@@ -16,10 +16,32 @@ Suggested repository description:
 > Capture JSON comments and formatting, process ordinary JSON, and restore the
 > presentation. A dependency-free Python command-line tool.
 
-Use **JSONIC — reversible comments for JSON** as the visible title. A repository
+Use **JSONIC — JavaScript Object Notation with Integrated Comments** as the visible title. A repository
 name such as `jsonic-comments` distinguishes it from the unrelated
 [`jsonic` parser](https://github.com/jsonicjs/jsonic). The local directory name
 does not need to match the public repository name.
+
+## Concrete advantages to show
+
+These comparisons describe the implementations and workflows examined in
+[our comparison](comparison.md). Several differences are intentional design
+choices in those projects, rather than defects in their intended use.
+
+| JSONIC behavior | Tested difference in the other tools |
+| --- | --- |
+| Restore exact spaces, tabs, blank-line spaces, line endings, and comment contents when data tokens are unchanged. | Both regenerate surrounding layout. comment-json also removed whitespace from a blank line inside a block comment. |
+| Preserve comments in every supported gap, including key/colon, colon/value, and value/comma. | Hjson's tested round trip dropped comments in several of these gaps. |
+| Copy number and string/key tokens without coercion, including `9007199254740993`, `-0`, and `1.00E+01`. | Default JavaScript value parsing/stringification rounded or normalized these numbers. comment-json can avoid numeric loss with its source-aware reviver. |
+| Apply array styling by position consistently, regardless of which program or mutation produced the new JSON. | comment-json array comment attachment varies with the mutation method. Hjson's exported metadata is also positional; that alone is not a unique feature. |
+| Skip removed keys and missing array positions without an orphan appendix. | Hjson's extract/merge workflow appended orphaned comments in the tested missing-path cases. |
+| Restore root scalar comments, headers/footers, and matching empty-container interiors. | comment-json lost root-null comments; Hjson had specific root/empty-array failures in its presentation workflow. |
+| Reject invalid UTF-8 and invalid JSON syntax before replacing output. | Hjson deliberately accepts broader syntax; its tested CLI replaced invalid UTF-8. comment-json accepts trailing commas. JSONIC's duplicate-key rejection is an extra integrity policy. |
+| Provide capture, ordinary-JSON processing, and exact restoration as a dependency-free file workflow. | Hjson already has comment extraction/merge; comment-json can transfer comments through an adapter. JSONIC supplies the complete file workflow and exact-gap contract directly. |
+
+Describe this as **JSON syntax plus comments, with reversible presentation**.
+Do not claim universal superiority or that JSONIC invented comment preservation.
+The useful distinction is preserving the author's actual presentation while
+existing software continues to process ordinary JSON.
 
 ## A short interview demo
 

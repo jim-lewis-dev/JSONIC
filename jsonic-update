@@ -158,15 +158,18 @@ def apply_update(repo, archive):
     print("Test it now: cd %s && python3 -m unittest discover -s tests -v" % repo)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("archive", nargs="?", type=Path,
-                        default=Path.home() / "Downloads" / "JSONIC.zip")
+    parser.add_argument("archive", nargs="?", type=Path)
     parser.add_argument("--repo", type=Path,
                         default=Path.home() / "projects" / "dont_fucking_waste_my_time_JSONIC")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    archive = args.archive or Path.home() / "Downloads" / "JSONIC.zip"
+    if args.archive is None and not archive.exists():
+        print("No update waiting. Download JSONIC.zip to ~/Downloads, then run jsonic-update.")
+        return 0
     try:
-        apply_update(args.repo, args.archive)
+        apply_update(args.repo, archive)
     except (UpdateError, OSError, ValueError, zipfile.BadZipFile) as error:
         print("jsonic-update: error: %s" % error, file=sys.stderr)
         return 1

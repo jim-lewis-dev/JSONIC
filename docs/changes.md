@@ -82,3 +82,9 @@ can fail after some bytes have already reached a pipe.
 mode, stages its own paths, and commits them. It does not change JSONIC's data
 file permission policy. ZIP removal happens after the change is recorded in
 Git. See [the update workflow](updates.md).
+
+The latest support-tool changes add `jsonic-export` for sharing actual project
+files and Git state, make a missing default download a friendly no-op, and
+preserve the full name **JavaScript Object Notation with Integrated Comments**.
+The comment grammar, duplicate-key rule, formatting, and data-file permission
+policies are unchanged by these support-tool changes.

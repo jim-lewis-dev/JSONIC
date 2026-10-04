@@ -26,9 +26,31 @@ Large-file throughput has not been benchmarked.
 
 ## Exact attachment rules
 
+The supported comments are `//` through the next CR/LF or end of file,
+`/* ... */`, and `''' ... '''`. Both block forms can span lines and end at
+their first closing delimiter; comments do not nest. Markers inside JSON
+strings are ordinary data. `#`, `<!-- ... -->`, and other comment forms are
+not supported. Triple single quotes denote comments here, not string values.
+
 Object-member gaps surround the key, colon, and value, keyed by the member's
 name within its object path. Text after a comma belongs before the next key.
 Renaming or moving a member changes that path; it is not identity matching.
+
+A useful convention is to put an entry's inline explanation after its complete
+value and before its comma:
+
+```jsonc
+{
+  "attempts": 3 /* Includes the first request. */,
+  "enabled": true
+}
+```
+
+That block comment belongs to `attempts`. Putting it after the comma would
+attach it to `enabled`. A `//` comment can occupy the same gap only if the
+comma appears on a following line, so `/* ... */` is clearer for inline notes.
+Comments around a field stay when its value changes type. Only presentation
+inside removed descendants has no matching location to restore.
 
 Array gaps belong before and after an element at its numeric position. If
 elements move, the comments stay at the positions. If the array gets shorter,
@@ -67,6 +89,12 @@ need the original appearance back.
 Input must be syntactically valid, use UTF-8, and have unique object keys.
 `.jsonic` permits the documented comments; it does not enable trailing commas,
 unquoted keys, or alternative number syntax.
+
+Unique keys are an additional JSONIC rule. [The JSON standard](https://www.rfc-editor.org/rfc/rfc8259#section-4)
+says names should be unique; its grammar permits duplicates, but implementations
+may keep the last value, reject the object, or retain every pair. JSONIC rejects
+duplicates to avoid silent data loss and ambiguous key-based style matching.
+Escaped spellings of the same decoded key count as duplicates.
 
 Output is computed before it is written. File output uses a temporary file in
 the destination directory, flushes it, then replaces the destination. Invalid

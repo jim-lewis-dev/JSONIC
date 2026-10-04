@@ -3,6 +3,9 @@
 - Maintain one current implementation. Do not add release numbers, numbered
   filenames, schema identifiers, migration code, or compatibility modes.
 - Keep Git local. Do not add a remote or push anything.
+- JSONIC stands for JavaScript Object Notation with Integrated Comments.
+- Use jsonic-export to obtain the user's current files and Git state before
+  preparing changes that depend on unseen local edits. Preserve those edits.
 - Deliver requested changes as JSONIC.zip with complete replacement files and
   update.json containing a plainspoken commit message and explicit removals.
   No numbered archive names. The user's jsonic-update command applies it to
