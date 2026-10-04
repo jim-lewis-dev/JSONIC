@@ -1,4 +1,4 @@
-# JSONIC
+# JSONIC - Java Script Object Notation with Integrated Comments
 
 Strip comments from JSON, use the data, and restore its comments and formatting.
 One executable, using the Python standard library.
