@@ -4,6 +4,7 @@
 Default: capture into <base>.jsonic.style, replacing any previous capture.
 --strip: remove comments, keeping outside whitespace and all line endings.
 --raw / --mini / --minified: remove comments and outside whitespace.
+--pretty: emit ordinary JSON with two-space indentation and unchanged tokens.
 --apply [STYLE]: apply captured presentation; missing keys/indices are ignored.
 
 .json is strict JSON; .jsonic also permits //, /* */ and triple-quote comments.
@@ -13,9 +14,9 @@ Data tokens are preserved byte for byte. See README.md for examples and rules.
 import argparse
 import json
 import os
+import secrets
 import stat
 import sys
-import tempfile
 
 WS_BYTES = b" \t\r\n"
 HEX = b"0123456789abcdefABCDEF"
@@ -109,19 +110,24 @@ def atomic_write_bytes(path, data):
     d = os.path.dirname(path) or "."
     base = os.path.basename(path)
     existing_mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else None
+    creation_mode = existing_mode if existing_mode is not None else 0o666
 
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=d,
-            prefix="." + base + ".tmp.",
-            delete=False,
-        ) as f:
-            tmp_path = f.name
+        # O_EXCL avoids collisions; 0666 lets the system apply its normal umask.
+        while True:
+            candidate = os.path.join(d, "." + base + ".tmp." + secrets.token_hex(8))
+            try:
+                fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                             | getattr(os, "O_BINARY", 0), creation_mode)
+                tmp_path = candidate
+                break
+            except FileExistsError:
+                continue
+        with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
-            # Preserve POSIX permission bits where supported; Windows has no fchmod.
+            # Restore exact existing bits after writes and creation-time umask.
             if existing_mode is not None and hasattr(os, "fchmod"):
                 os.fchmod(f.fileno(), existing_mode)
             os.fsync(f.fileno())
@@ -710,6 +716,41 @@ def strip_document(data, *, allow_comments, preserve_whitespace=False):
     kept.append(data[cursor:])
     return b"".join(kept)
 
+def pretty_document(data, *, allow_comments):
+    # Validate with the shared grammar, then add whitespace to the original tokens.
+    raw = strip_document(data, allow_comments=allow_comments)
+    scanner = Scanner(raw, forbid_style=True)
+    set_context(scanner=scanner, ptr="")
+    out = []
+    depth = 0
+    previous = None
+    while not scanner.eof():
+        c = scanner.peek()
+        if c in b"{[":
+            out.append(bytes([scanner.read_byte()]))
+            depth += 1
+            if scanner.peek() not in (ord("}"), ord("]")):
+                out.append(b"\n" + b"  " * depth)
+        elif c in b"}]":
+            depth -= 1
+            if previous not in (ord("{"), ord("[")):
+                out.append(b"\n" + b"  " * depth)
+            out.append(bytes([scanner.read_byte()]))
+        elif c == ord(","):
+            scanner.read_byte()
+            out.append(b",\n" + b"  " * depth)
+        elif c == ord(":"):
+            scanner.read_byte()
+            out.append(b": ")
+        elif c == ord('"'):
+            out.append(scanner.read_string_token())
+        elif c == ord("-") or ord("0") <= c <= ord("9"):
+            out.append(scanner.read_number_token())
+        else:
+            out.append(scanner.read_literal_token())
+        previous = c
+    return b"".join(out) + b"\n"
+
 def _input_info(input_path):
     # Extension selects the accepted syntax; the flags select the operation.
     root, ext = os.path.splitext(input_path)
@@ -807,6 +848,7 @@ def main(argv):
             "\n\t%(prog)s input [-o OUTPUT.jsonic.style]\n"
             "\t%(prog)s input --raw [-o OUTPUT.json]\n"
             "\t%(prog)s input --strip [-o OUTPUT.json]\n"
+            "\t%(prog)s input --pretty [-o OUTPUT.json]\n"
             "\t%(prog)s input --apply [STYLE.jsonic.style] [-o OUTPUT.jsonic]\n\n"
         ),
         description="Capture, strip, and restore JSON comments and whitespace.",
@@ -819,6 +861,8 @@ def main(argv):
                       help="emit raw JSON: remove comments and outside whitespace")
     mode.add_argument("--strip", action="store_true",
                       help="remove comments; preserve outside whitespace and all line endings")
+    mode.add_argument("--pretty", action="store_true",
+                      help="emit JSON with two-space indentation; preserve data tokens")
     mode.add_argument(
         "--apply",
         nargs="?",
@@ -840,12 +884,15 @@ def main(argv):
         root, ext, meta_default = _input_info(args.input)
         allow_comments = (ext == ".jsonic")
 
-        # RAW
-        if args.raw or args.strip:
+        # JSON output: raw, whitespace-preserving strip, or pretty.
+        if args.raw or args.strip or args.pretty:
             with open(args.input, "rb") as f:
                 raw_in = f.read()
-            raw = strip_document(raw_in, allow_comments=allow_comments,
-                                 preserve_whitespace=args.strip)
+            if args.pretty:
+                raw = pretty_document(raw_in, allow_comments=allow_comments)
+            else:
+                raw = strip_document(raw_in, allow_comments=allow_comments,
+                                     preserve_whitespace=args.strip)
 
             if args.output:
                 atomic_write_bytes(args.output, raw)

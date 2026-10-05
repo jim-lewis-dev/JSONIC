@@ -43,6 +43,11 @@ def main():
         run(data, "--apply", "-o", restored)
         require(restored.read_bytes() == original, "unchanged round trip")
 
+        run(source, "--pretty", "-o", data)
+        show("Readable ordinary JSON", data.read_bytes())
+        run(data, "--apply", "-o", restored)
+        require(restored.read_bytes() == original, "pretty JSON restores exact presentation")
+
         # This step uses only Python's ordinary JSON library.
         values = json.loads(data.read_bytes())
         values["attempts"] = 5
@@ -68,12 +73,13 @@ def main():
         complex_data = work / "config.json"
         complex_output = work / "config-restored.jsonic"
         run(complex_source, "-o", complex_style)
-        run(complex_source, "--raw", "-o", complex_data)
+        run(complex_source, "--pretty", "-o", complex_data)
         json.loads(complex_data.read_bytes())
+        require(b'1.00E+01' in complex_data.read_bytes(), "pretty preserves number spelling")
         run(complex_data, "--apply", "-o", complex_output)
         require(complex_output.read_bytes() == complex_source.read_bytes(), "complex round trip")
 
-    print("PASS: exact restoration, a real JSON edit, positional comments, and the complex example.")
+    print("PASS: exact raw/pretty restoration, a real JSON edit, positional comments, and the complex example.")
 
 
 if __name__ == "__main__":

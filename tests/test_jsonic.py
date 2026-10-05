@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -128,6 +129,53 @@ class JsonicTests(unittest.TestCase):
             b'[-0,1.00E+03,1e9999,123456789012345678901234567890,"\\u0061\\/"]',
         )
 
+    def test_pretty_has_fixed_layout_and_preserves_exact_tokens(self):
+        string_token = br'"// /* */ ' + b"'''" + br' \" \\ \u0061\/"'
+        source = (
+            b'// header\r\n{' + br'"\u0061"' + b':/* first */['
+            b'-0,1.00E+03,1e9999,123456789012345678901234567890,'
+            + string_token + b',{},[]],"z":' + b"'''third'''"
+            + b'{"enabled":true,"gone":null}}'
+        )
+        expected = (
+            b'{\n  ' + br'"\u0061"' + b': [\n'
+            b'    -0,\n    1.00E+03,\n    1e9999,\n'
+            b'    123456789012345678901234567890,\n'
+            b'    ' + string_token + b',\n    {},\n    []\n  ],\n'
+            b'  "z": {\n    "enabled": true,\n    "gone": null\n  }\n}\n'
+        )
+        self.assertEqual(jsonic.pretty_document(source, allow_comments=True), expected)
+        path = self.file("pretty.jsonic", source)
+        result = self.cli(path, "--pretty")
+        self.assert_ok(result)
+        self.assertEqual(result.stdout, expected)
+        self.assertEqual(path.read_bytes(), source)
+        self.assertFalse((self.work / "pretty.jsonic.style").exists())
+        for value in (b'{}', b'[]', b'-0', string_token):
+            with self.subTest(root=value):
+                self.assertEqual(jsonic.pretty_document(value, allow_comments=False), value + b'\n')
+
+    def test_capture_pretty_apply_restores_original_and_pretty_is_idempotent(self):
+        for fixture in (FIXTURES / "comprehensive.jsonic", ROOT / "examples" / "config.jsonic"):
+            with self.subTest(file=fixture.name):
+                original = fixture.read_bytes()
+                path = self.file("original.jsonic", original)
+                clean = self.work / "pretty.json"
+                style = self.work / "original.jsonic.style"
+                self.assert_ok(self.cli(path))
+                captured = style.read_bytes()
+                self.assert_ok(self.cli(path, "--pretty", "-o", clean))
+                pretty = clean.read_bytes()
+                self.assertEqual(jsonic.pretty_document(pretty, allow_comments=False), pretty)
+                self.assertEqual(
+                    jsonic.strip_document(pretty, allow_comments=False),
+                    jsonic.strip_document(original, allow_comments=True),
+                )
+                self.assertEqual(style.read_bytes(), captured)
+                restored = self.cli(clean, "--apply", style)
+                self.assert_ok(restored)
+                self.assertEqual(restored.stdout, original)
+
     def test_values_change_without_changing_presentation(self):
         source = b'/*start*/{ "attempts": /*count*/ 3, "enabled": true /*tail*/ }\n'
         target = b'{"attempts":5,"enabled":false}'
@@ -170,6 +218,14 @@ class JsonicTests(unittest.TestCase):
         source = b'{"a":1, // before b\n"b":2}'
         self.assertEqual(self.restore(source, b'{"b":3}'), b'{ // before b\n"b":3}')
         self.assertEqual(self.restore(source, b'{"a":3}'), b'{"a":3}')
+
+    def test_before_comma_comment_survives_every_replacement_value_type(self):
+        source = b'{"value":{"old":1}/* field comment */,"next":2}'
+        for value in (b'{"new":3}', b'[3,4]', b'"changed"', b'4.00', b'true', b'false', b'null'):
+            with self.subTest(value=value):
+                target = b'{"value":' + value + b',"next":2}'
+                expected = b'{"value":' + value + b'/* field comment */,"next":2}'
+                self.assertEqual(self.restore(source, target), expected)
 
     def test_unusual_keys_do_not_collide(self):
         source = b'{"a/b":{"~x":/*slash*/1},"a":{"b":{"~x":/*nested*/2}},"":/*empty*/3}'
@@ -254,7 +310,7 @@ class JsonicTests(unittest.TestCase):
         style = self.file("valid.style", b'{}')
         for source in invalid:
             path = self.file("invalid.jsonic", source)
-            for operation in ([], ["--raw"], ["--strip"], ["--apply", style]):
+            for operation in ([], ["--raw"], ["--strip"], ["--pretty"], ["--apply", style]):
                 with self.subTest(source=source, operation=operation):
                     output = self.file("existing-output", b"unchanged")
                     result = self.cli(path, *operation, "-o", output)
@@ -264,9 +320,11 @@ class JsonicTests(unittest.TestCase):
     def test_comments_in_json_rejected_by_every_operation(self):
         path = self.file("strict.json", b'{"x":/*not permitted here*/1}')
         style = self.file("empty.style", b'{}')
-        for operation in ([], ["--raw"], ["--strip"], ["--apply", style]):
+        for operation in ([], ["--raw"], ["--strip"], ["--pretty"], ["--apply", style]):
             with self.subTest(operation=operation):
-                self.assert_error(self.cli(path, *operation))
+                output = self.file("existing-output", b"unchanged")
+                self.assert_error(self.cli(path, *operation, "-o", output))
+                self.assertEqual(output.read_bytes(), b"unchanged")
 
     def test_retained_trailing_comma_example_is_rejected(self):
         result = self.cli(FIXTURES / "reject-trailing-comma.jsonic", "--raw")
@@ -294,19 +352,37 @@ class JsonicTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
         self.assert_ok(self.cli(path, "--raw", "-o", path))
         self.assertEqual(path.read_bytes(), b'{"x":1}')
+        self.assert_ok(self.cli(path, "--pretty", "-o", path))
+        self.assertEqual(path.read_bytes(), b'{\n  "x": 1\n}\n')
         self.assert_ok(self.cli(path, "--apply", "-o", path))
         self.assertEqual(path.read_bytes(), original)
         if os.name == "posix":
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX umask and file permission bits")
+    def test_new_output_files_follow_the_inherited_umask(self):
+        path = self.file("permissions.jsonic", b'/*note*/{"x":1}')
+        for mask, expected_mode in ((0o022, 0o644), (0o077, 0o600)):
+            for operation in ([], ["--raw"], ["--strip"], ["--pretty"]):
+                with self.subTest(umask=oct(mask), operation=operation):
+                    output = self.work / ("output-%s-%s" % (mask, operation[0] if operation else "capture"))
+                    result = subprocess.run(
+                        [sys.executable, str(PROGRAM), str(path), *operation, "-o", str(output)],
+                        cwd=self.work, capture_output=True, timeout=15, umask=mask,
+                    )
+                    self.assert_ok(result)
+                    self.assertEqual(stat.S_IMODE(output.stat().st_mode), expected_mode)
+
     def test_recapture_and_in_place_writes_without_fchmod(self):
         original = b'/*header*/{ "x": 1 }\n'
         path = self.file("portable.jsonic", original)
         # Exercise the missing API locally; this is not a native Windows run.
-        with patch.object(jsonic, "os", wraps=os) as platform_os:
-            del platform_os.fchmod
+        portable_os = SimpleNamespace(**{
+            name: value for name, value in vars(os).items() if name != "fchmod"
+        })
+        with patch.object(jsonic, "os", portable_os) as platform_os:
             self.assertFalse(hasattr(platform_os, "fchmod"))
-            for operation in ([], [], ["--strip"], ["--raw"], ["--apply"]):
+            for operation in ([], [], ["--strip"], ["--raw"], ["--pretty"], ["--apply"]):
                 args = [str(path), *operation]
                 if operation:
                     args += ["-o", str(path)]
@@ -348,11 +424,16 @@ class JsonicTests(unittest.TestCase):
     def test_cli_help_and_missing_operation_input(self):
         result = self.cli("--help")
         self.assert_ok(result)
-        for option in (b"--raw", b"--mini", b"--minified", b"--strip", b"--apply"):
+        for option in (b"--raw", b"--mini", b"--minified", b"--strip", b"--pretty", b"--apply"):
             self.assertIn(option, result.stdout)
         self.assertNotEqual(self.cli().returncode, 0)
         path = self.file("valid.json", b"[]")
         self.assertNotEqual(self.cli(path, "--strip", "--raw").returncode, 0)
+        for conflicting in ("--raw", "--mini", "--minified", "--strip", "--apply"):
+            with self.subTest(conflicting=conflicting):
+                output = self.file("unchanged.json", b"original")
+                self.assert_error(self.cli(path, "--pretty", conflicting, "-o", output))
+                self.assertEqual(output.read_bytes(), b"original")
 
     def test_generated_documents_preserve_bytes_and_data(self):
         rng = random.Random(37031)
@@ -382,6 +463,9 @@ class JsonicTests(unittest.TestCase):
                 source = gap() + document() + gap()
                 raw = self.roundtrip(source)
                 json.loads(raw)
+                pretty = jsonic.pretty_document(source, allow_comments=True)
+                self.assertEqual(jsonic.strip_document(pretty, allow_comments=False), raw)
+                self.assertEqual(jsonic.pretty_document(pretty, allow_comments=False), pretty)
 
     def test_a_thousand_commented_records(self):
         source = b"[\n" + b",\n".join(

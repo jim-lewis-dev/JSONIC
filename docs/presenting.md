@@ -1,104 +1,69 @@
 # Presenting JSONIC
 
-## Recommended home
+**JSONIC — JavaScript Object Notation with Integrated Comments.**
 
-Make a public GitHub repository the source of truth. Lead with the README,
-working demo, tests, and a clear license. Pin it on your profile and link it
-from your résumé or portfolio.
+## A two-minute demonstration
 
-A small project page can provide a friendlier entrance. GitHub Pages can host
-static HTML, CSS, and JavaScript from the same repository; it needs no separate
-application server. Keep the source, installation, and download links pointing
-to the repository so there is only one implementation to maintain.
+Run `python3 examples/demo.py` from the project directory. Explain what appears:
 
-Suggested repository description:
+1. **The problem:** “People need explanations beside configuration values,
+   but their existing software expects ordinary JSON.”
+2. **The separation:** “JSONIC saves comments and spacing in a companion style
+   file, then produces ordinary JSON.”
+3. **The edit:** “This step uses Python's normal JSON library to change a value.
+   That program knows nothing about comments.”
+4. **The restoration:** “The updated value stays; the saved presentation comes
+   back. Unchanged data tokens restore the original file byte for byte.”
+5. **The contract:** “Array comments belong to positions. Shortening the array
+   omits comments for missing positions; it does not move them to the bottom.”
 
-> Capture JSON comments and formatting, process ordinary JSON, and restore the
-> presentation. A dependency-free Python command-line tool.
+Use the complex example and test suite for follow-up questions. `--pretty`
+offers readable ordinary JSON while preserving token spelling and order;
+restoration uses the captured presentation.
 
-Use **JSONIC — JavaScript Object Notation with Integrated Comments** as the visible title. A repository
-name such as `jsonic-comments` distinguishes it from the unrelated
-[`jsonic` parser](https://github.com/jsonicjs/jsonic). The local directory name
-does not need to match the public repository name.
+## Eight concrete strengths
 
-## Concrete advantages to show
+These observations refer to the implementations and workflows examined in
+[the comparison](comparison.md), not every possible implementation. Some
+differences reflect deliberate priorities rather than bugs.
 
-These comparisons describe the implementations and workflows examined in
-[our comparison](comparison.md). Several differences are intentional design
-choices in those projects, rather than defects in their intended use.
-
-| JSONIC behavior | Tested difference in the other tools |
+| JSONIC behavior | Observed comparison |
 | --- | --- |
-| Restore exact spaces, tabs, blank-line spaces, line endings, and comment contents when data tokens are unchanged. | Both regenerate surrounding layout. comment-json also removed whitespace from a blank line inside a block comment. |
-| Preserve comments in every supported gap, including key/colon, colon/value, and value/comma. | Hjson's tested round trip dropped comments in several of these gaps. |
-| Copy number and string/key tokens without coercion, including `9007199254740993`, `-0`, and `1.00E+01`. | Default JavaScript value parsing/stringification rounded or normalized these numbers. comment-json can avoid numeric loss with its source-aware reviver. |
-| Apply array styling by position consistently, regardless of which program or mutation produced the new JSON. | comment-json array comment attachment varies with the mutation method. Hjson's exported metadata is also positional; that alone is not a unique feature. |
-| Skip removed keys and missing array positions without an orphan appendix. | Hjson's extract/merge workflow appended orphaned comments in the tested missing-path cases. |
-| Restore root scalar comments, headers/footers, and matching empty-container interiors. | comment-json lost root-null comments; Hjson had specific root/empty-array failures in its presentation workflow. |
-| Reject invalid UTF-8 and invalid JSON syntax before replacing output. | Hjson deliberately accepts broader syntax; its tested CLI replaced invalid UTF-8. comment-json accepts trailing commas. JSONIC's duplicate-key rejection is an extra integrity policy. |
-| Provide capture, ordinary-JSON processing, and exact restoration as a dependency-free file workflow. | Hjson already has comment extraction/merge; comment-json can transfer comments through an adapter. JSONIC supplies the complete file workflow and exact-gap contract directly. |
+| Exact spaces, tabs, blank-line spaces, line endings, and comment contents when tokens are unchanged. | Hjson and comment-json regenerate surrounding layout; comment-json also stripped blank-line spaces inside a block comment. |
+| Comments in every supported gap, including key/colon, colon/value, and value/comma. | Hjson dropped comments in several tested gaps. |
+| Number and string/key tokens copied without coercion, including `9007199254740993`, `-0`, and `1.00E+01`. | Default JavaScript workflows rounded or normalized numbers. comment-json can avoid numeric loss with its source-aware reviver. |
+| Array styling always follows positions, including nested paths. | comment-json attachment depends on the mutation method. Hjson's exported metadata is also positional. |
+| Absent keys and positions receive no comments or orphan appendix. | Hjson extract/merge appended orphan comments for tested missing paths. |
+| Root scalar comments, headers/footers, and matching empty-container interiors restore. | comment-json lost root-null comments; Hjson had specific root/empty-array failures. |
+| Invalid UTF-8 and invalid JSON syntax fail before replacing output. | Hjson accepts broader syntax and its tested CLI replaced invalid UTF-8; comment-json accepts trailing commas. Unique keys are JSONIC's additional integrity rule. |
+| A complete capture → ordinary JSON → restore file workflow with no third-party dependencies. | Hjson already exports comment metadata; comment-json can transfer it through an adapter. JSONIC directly supplies the file workflow and exact-gap rules. |
 
-Describe this as **JSON syntax plus comments, with reversible presentation**.
-Do not claim universal superiority or that JSONIC invented comment preservation.
-The useful distinction is preserving the author's actual presentation while
-existing software continues to process ordinary JSON.
+## Be ready to explain
 
-## A short interview demo
+- **Why bytes:** copying validated tokens avoids numeric rounding and unwanted
+  changes to escape sequences.
+- **Why paths and positions:** predictable attachment works independently of
+  how another program edits the data. It does not infer a comment's meaning.
+- **Why a style file:** existing JSON programs need no comment-aware integration.
+- **Why the scope stays small:** one executable, whole-file parsing, explicit
+  rules, and tests comparing actual bytes. Large-file throughput is unbenchmarked.
 
-Run `python3 examples/demo.py` and explain the results:
+Put a comment after its complete value and before the comma when it describes
+that member: `"setting": [] /* explanation */,`. It stays with that member
+at the same path even if the value changes type. Comments inside a replaced
+container cannot follow a scalar; comments after a comma belong to the next entry.
 
-1. Humans write explanations beside configuration values.
-2. JSONIC saves that presentation and hands standard JSON to another program.
-3. That program changes a value using its ordinary JSON library.
-4. JSONIC restores the saved comments and spacing around the new value.
-5. A shortened array shows the explicit rule: comments belong to positions,
-   and missing positions receive no comment.
+External software can still round a number or rewrite string escapes. JSONIC
+preserves what that software returns; it cannot recover discarded data.
+Linux has been exercised; native macOS and Windows remain unverified.
 
-The last step is useful evidence of a deliberate contract. Follow it with the
-test command if asked about correctness, rather than presenting a wall of tests
-before explaining the problem.
-
-Suggested project summary for a résumé:
+## Résumé summary
 
 > Built a Python CLI that separates comments and formatting from JSON data and
 > restores them after ordinary JSON processing; implemented byte-preserving
-> parsing, deterministic key/index matching, safe file replacement, and tests
+> parsing, deterministic key/index matching, atomic file replacement, and tests
 > covering exact round trips, structural edits, and generated documents.
 
-Be ready to explain these choices:
-
-- Why a byte scanner preserves number spellings and escape sequences that
-  parsing and serializing values can change.
-- Why object paths and array positions provide predictable matching.
-- Why comments for removed entries are omitted and new style is not guessed.
-- Why a separate style file lets existing programs stay unaware of comments.
-- Why whole-file parsing and a named-file CLI are sufficient for this scope.
-
-## The project page
-
-Keep it to a single page: a one-sentence promise, a visible annotated → raw →
-edited-and-restored example, an installation command, and links to source,
-tests, and the exact restoration rules. A small example selector can show
-changed values, a shortened array, and the nested configuration.
-
-Generate displayed results with the actual CLI. Do not write a second parser
-in JavaScript just for the page. If a live arbitrary-input playground is later
-worth adding, decide how to run the existing implementation there.
-
-## Before publishing
-
-- Confirm the GitHub account and repository name.
-- Choose a license and copyright attribution. MIT is a straightforward option
-  for allowing reuse; review its terms before adding `LICENSE`.
-- Run the suite and demo on native Windows and macOS if claiming those systems
-  as verified. Linux is already checked.
-- Enable automated tests on pushes once the repository exists. Keep status
-  claims tied to actual runs.
-- Publish the repository, then the optional project page. Add both links to
-  your profile and résumé.
-
-The prepared package is local. No public repository or website has been
-created, no license has been granted, and no remote has been configured.
-
-References: [GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages),
-[repository licensing](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository).
+The interview claim is **JSON syntax plus comments, with reversible
+presentation**. Explain the exact contract and demonstrate it; comment
+preservation and separate metadata are not unique inventions of this project.

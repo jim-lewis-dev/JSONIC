@@ -17,6 +17,7 @@ SKIP_DIRS = {
     ".venv", "venv", ".tox", ".nox", "node_modules", "build", "dist",
 }
 STATE_NAME = "project-state.json"
+SNAPSHOT_NAME = "JSONIC-snapshot.zip"
 
 
 class ExportError(Exception):
@@ -79,7 +80,8 @@ def project_paths(repo, output):
             path = current / name
             relative = path.relative_to(repo).as_posix()
             if (name == ".git" or name == ".DS_Store" or
-                    name.endswith((".pyc", ".pyo")) or path == output):
+                    name.endswith((".pyc", ".pyo")) or path == output
+                    or relative == SNAPSHOT_NAME):
                 excluded.append(relative)
             else:
                 paths.append(path)
@@ -104,7 +106,7 @@ def export(repo, output):
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
-            dir=output.parent, prefix=".jsonic-export-", suffix=".zip", delete=False,
+            dir=output.parent, prefix=".export-", suffix=".zip", delete=False,
         ) as stream:
             temporary = Path(stream.name)
             with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -135,18 +137,19 @@ def export(repo, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent,
-                        help="project repository (default: this executable's directory)")
+    project = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+    parser.add_argument("--project", type=Path, default=project,
+                        help="project repository (default: this script's directory)")
     parser.add_argument("-o", "--output", type=Path,
-                        default=Path.home() / "Downloads" / "JSONIC-snapshot.zip",
-                        help="snapshot ZIP (default: ~/Downloads/JSONIC-snapshot.zip)")
+                        help="snapshot ZIP (default: PROJECT/JSONIC-snapshot.zip)")
     args = parser.parse_args(argv)
     try:
-        output = export(repository(args.repo), args.output)
+        repo = repository(args.project)
+        output = export(repo, args.output or repo / SNAPSHOT_NAME)
         print(output)
         return 0
     except (ExportError, OSError, ValueError, zipfile.BadZipFile) as error:
-        print("jsonic-export: error: %s" % error, file=sys.stderr)
+        print("export.py: error: %s" % error, file=sys.stderr)
         return 2
 
 

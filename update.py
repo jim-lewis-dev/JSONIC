@@ -19,6 +19,7 @@ class UpdateError(Exception):
 def git(repo, *args):
     result = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True,
+        env=dict(os.environ, GIT_OPTIONAL_LOCKS="0"),
     )
     if result.returncode:
         raise UpdateError(result.stderr.strip() or result.stdout.strip() or "Git failed")
@@ -104,8 +105,8 @@ def apply_update(repo, archive):
     if Path(git(repo, "rev-parse", "--show-toplevel")).resolve() != repo:
         raise UpdateError("Target must be the root of its own Git repository")
     git(repo, "rev-parse", "--verify", "HEAD")
-    if git(repo, "status", "--porcelain", "--untracked-files=no"):
-        raise UpdateError("Repository has uncommitted tracked changes. Commit or undo them, then run again.")
+    if git(repo, "status", "--porcelain", "--untracked-files=all"):
+        raise UpdateError("Repository has uncommitted or untracked work. Commit, remove, or ignore it, then run again.")
     git(repo, "var", "GIT_AUTHOR_IDENT")
     git(repo, "var", "GIT_COMMITTER_IDENT")
 
@@ -161,17 +162,20 @@ def apply_update(repo, archive):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", nargs="?", type=Path)
-    parser.add_argument("--repo", type=Path,
-                        default=Path.home() / "projects" / "dont_fucking_waste_my_time_JSONIC")
+    project = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+    parser.add_argument("--project", type=Path, default=project,
+                        help="project repository (default: this script's directory)")
+    parser.add_argument("--downloads", type=Path, default=Path.home() / "Downloads",
+                        help="download directory (default: ~/Downloads)")
     args = parser.parse_args(argv)
-    archive = args.archive or Path.home() / "Downloads" / "JSONIC.zip"
+    archive = args.archive or args.downloads.expanduser() / "JSONIC.zip"
     if args.archive is None and not archive.exists():
-        print("No update waiting. Download JSONIC.zip to ~/Downloads, then run jsonic-update.")
+        print("No update waiting. Download JSONIC.zip to %s, then run update.py." % archive.parent)
         return 0
     try:
-        apply_update(args.repo, archive)
+        apply_update(args.project, archive)
     except (UpdateError, OSError, ValueError, zipfile.BadZipFile) as error:
-        print("jsonic-update: error: %s" % error, file=sys.stderr)
+        print("update.py: error: %s" % error, file=sys.stderr)
         return 1
     return 0
 

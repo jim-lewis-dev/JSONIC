@@ -1,118 +1,136 @@
-# One command to apply JSONIC updates
+# Updates and snapshots
 
-Every update is named **JSONIC.zip**. Download it to `~/Downloads` and run:
-
-```bash
-~/.local/bin/jsonic-update
-```
-
-The updater targets `~/projects/dont_fucking_waste_my_time_JSONIC`. It writes
-the packaged project files, makes a local Git commit using the message included
-with that change, and removes the downloaded ZIP after success. You then test
-the committed code. It does not run tests for you or push anything.
-
-## First-time setup
-
-Download `JSONIC.zip` to Downloads, then paste this complete block once:
+Both executable utilities live inside the project. From its directory:
 
 ```bash
-python3 - <<'PY' &&
-from pathlib import Path
-from zipfile import ZipFile
-
-with ZipFile(Path.home() / "Downloads" / "JSONIC.zip") as package:
-    source = package.read("jsonic-update")
-exec(compile(source, "jsonic-update", "exec"), {"__name__": "__main__"})
-PY
-mkdir -p "$HOME/.local/bin" &&
-ln -sfn "$HOME/projects/dont_fucking_waste_my_time_JSONIC/jsonic-update" \
-    "$HOME/.local/bin/jsonic-update"
+./update.py
+./export.py
 ```
 
-This applies and commits the first ZIP, then creates the command as a symlink
-to the updater inside the project. Later ZIPs can update the tool itself.
-The explicit `~/.local/bin/jsonic-update` command works regardless of PATH.
+`update.py` reads `~/Downloads/JSONIC.zip`, applies it, commits locally, then
+removes the downloaded ZIP. `export.py` writes `JSONIC-snapshot.zip` **inside
+the project**, replacing the previous snapshot. It is ignored by Git.
+The defaults follow the scripts' project, not the terminal's working directory.
 
-The existing repository must already have its initial commit and Git author
-identity configured. The updater uses your existing identity and branch.
+## Apply an update
 
-## Test afterward
+Download `JSONIC.zip` into Downloads and run:
 
 ```bash
 cd ~/projects/dont_fucking_waste_my_time_JSONIC &&
+./update.py
+```
+
+The repository needs an existing commit and configured Git author identity.
+**Any nonignored staged, unstaged, or untracked work stops the update**, including
+unrelated files. Commit, discard, or move that work yourself before retrying.
+The updater never creates a checkpoint commit, stashes work, or resets it.
+
+Tests run afterward, when you choose:
+
+```bash
 python3 -m unittest discover -s tests -v &&
 python3 examples/demo.py
 ```
 
-Inspect the last change with `git show --stat` or `git show`. An identical
-already-applied ZIP is removed without creating an empty commit.
-Running the command again without a new download reports "No update waiting"
-and makes no changes. An explicitly named missing archive remains an error.
+`git show --stat` summarizes the committed change. A missing default download
+reports “No update waiting.” An identical ZIP is removed without an empty
+commit; an explicitly named missing ZIP is an error.
 
-## Share the current project
-
-Run this from any directory:
+## Share the actual project
 
 ```bash
-~/projects/dont_fucking_waste_my_time_JSONIC/jsonic-export
+./export.py
 ```
 
-Attach `~/Downloads/JSONIC-snapshot.zip` to the conversation. It contains the
-current project files, including local edits, useful untracked files, and
-ignored configuration/style files. Its `project-state.json` records the branch,
-current commit, recent commit messages, status, staged/unstaged diffs, file modes,
-and file hashes. Git's internal directory, caches, and build/dependency outputs
-are excluded. Symlink targets are recorded without copying their contents.
+Attach `~/projects/dont_fucking_waste_my_time_JSONIC/JSONIC-snapshot.zip`.
+Export can capture local edits, untracked files, and useful ignored
+configuration/style files. `project-state.json` records Git state, diffs,
+file hashes, and permissions. Git internals, generated caches/build outputs,
+and the snapshot itself are excluded; symlinks are recorded without copying
+their targets.
 
-The exporter does not stage, commit, run tests, or alter project files. It
-replaces the previous snapshot. Project file contents are included, so inspect
-any private configuration before sharing. This is a review snapshot, not an
-update package; do not pass it to jsonic-update.
+Export does not stage, commit, run tests, or change project files. Review any
+private configuration before sharing. A snapshot is for review, not input to
+`update.py`.
 
-For another repository or destination:
+## Other locations
 
 ```bash
-python3 jsonic-export --repo /path/to/project -o /path/to/JSONIC-snapshot.zip
+./update.py /path/to/JSONIC.zip --project /path/to/project
+./update.py --downloads /path/to/downloads
+./export.py --project /path/to/project -o /path/to/JSONIC-snapshot.zip
 ```
 
-## What the updater changes
+Without `-o`, export always writes inside the selected project. Normal JSONIC
+use needs neither these utilities nor Git; they support local development.
 
-- The archive contains complete replacement files and an `update.json` message.
-  That message file is consumed by the updater, not copied into the project.
-- File removals must be named explicitly in its `remove` list. Unmentioned
-  files are left alone; an absent ZIP entry does not mean deletion.
-- Packaged scripts receive executable permissions; other packaged source files
-  receive ordinary read permissions. This is source installation, separate from
-  JSONIC's rules for writing your JSON data files.
-- Only the update's file paths are staged. Unrelated untracked experiments and
-  generated outputs remain untracked.
-- Existing Git history stays in place. No backup directories, extra checkouts,
-  remotes, pushes, or numbered downloads are created.
+## What an update contains
 
-## If something stops
+`update.json` has two fields:
 
-Uncommitted tracked changes stop the update before any files are changed.
-Commit or undo those edits first. A packaged path also cannot overwrite or
-delete an existing untracked file, including an ignored file.
+```json
+{"message":"Make JSONIC easier to use","remove":[]}
+```
 
-The ZIP is checked before extraction; it cannot replace Git's internal files,
-escape the project directory, or redirect a write through an existing symlink.
+`message` supplies the commit message; `remove` names deliberate file deletions.
+The updater consumes this file rather than installing it. It is unrelated to
+comment style files. Other ZIP entries are complete replacement files; omitted
+paths remain unchanged. Scripts receive executable permissions.
 
-If writing or committing fails after application starts, the ZIP remains and
-the tool reports that the repository may contain applied changes. Inspect
-`git status` and finish or undo that work before retrying. There is no automatic
-reset that could erase work you make while diagnosing a failure. A whole ZIP
-is not one filesystem transaction; each file replacement is atomic.
+The archive is checked before application. It cannot replace Git internals,
+escape the project, or write through an existing symlink. Ignored local files
+also cannot be overwritten or deleted by a packaged path. Existing history
+remains; nothing is pushed.
 
-If Git succeeds but deleting the ZIP fails, the commit remains successful.
-Delete the download yourself or rerun the tool; it will recognize unchanged
-content and avoid a second commit.
+If writing or committing fails, the ZIP stays and applied files may remain.
+Inspect `git status` before retrying. Each file replacement is atomic; the
+whole update is not one transaction. If only ZIP deletion fails after a commit,
+remove the ZIP yourself or rerun the updater.
 
-An alternative ZIP or repository can be named explicitly:
+## Start using the renamed tools
+
+If this project still has `jsonic-update`, apply the downloaded change once:
 
 ```bash
-~/.local/bin/jsonic-update /path/to/JSONIC.zip --repo /path/to/project
+python3 jsonic-update
 ```
 
-This updater is for the local Ubuntu/POSIX development workflow and requires
-Python and Git. It is independent of JSONIC's capture/strip/restore operation.
+That update installs `update.py` and `export.py` as executable files and removes
+the old project commands. Subsequent updates use `./update.py`.
+
+If no updater is present, this bootstrap applies the ZIP to an **existing,
+committed repository**:
+
+```bash
+python3 - <<'BOOTSTRAP'
+from pathlib import Path
+from zipfile import ZipFile
+import sys
+
+project = Path.home() / "projects" / "dont_fucking_waste_my_time_JSONIC"
+with ZipFile(Path.home() / "Downloads" / "JSONIC.zip") as package:
+    source = package.read("update.py")
+sys.argv = ["update.py", "--project", str(project)]
+exec(compile(source, "update.py", "exec"), {"__name__": "__main__"})
+BOOTSTRAP
+```
+
+For a fresh ordinary installation, follow [INSTALL.md](../INSTALL.md).
+
+## Remove the old launcher and snapshot
+
+After the new exporter succeeds, this removes the known old launcher symlink
+and Downloads snapshot. It leaves the installed `jsonic` command alone:
+
+```bash
+./export.py &&
+if [ "$(readlink "$HOME/.local/bin/jsonic-update")" = \
+     "$HOME/projects/dont_fucking_waste_my_time_JSONIC/jsonic-update" ]; then
+    rm -- "$HOME/.local/bin/jsonic-update"
+fi &&
+rm -f -- "$HOME/Downloads/JSONIC-snapshot.zip"
+```
+
+The maintenance utilities require Python and Git and target the local
+Ubuntu/POSIX development workflow.

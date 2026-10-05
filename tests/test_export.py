@@ -12,7 +12,7 @@ import unittest
 import zipfile
 
 
-PROGRAM = Path(__file__).resolve().parents[1] / "jsonic-export"
+PROGRAM = Path(__file__).resolve().parents[1] / "export.py"
 
 
 @unittest.skipUnless(shutil.which("git"), "Git is required for repository snapshots")
@@ -46,7 +46,7 @@ class ExportTests(unittest.TestCase):
         )
 
     def snapshot(self, *args):
-        result = self.cli("--repo", self.repo, "-o", self.output, *args)
+        result = self.cli("--project", self.repo, "-o", self.output, *args)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         self.assertEqual(result.stderr, b"")
         with zipfile.ZipFile(self.output) as archive:
@@ -68,6 +68,8 @@ class ExportTests(unittest.TestCase):
         self.file("__pycache__/cached.pyc", b"discard")
         self.file("node_modules/package/index.js", b"discard")
         self.file("build/generated", b"discard")
+        self.file("JSONIC-snapshot.zip", b"previous snapshot")
+        self.file("fixtures/sample.zip", b"real project data")
         before = self.git("status", "--porcelain", "--untracked-files=all")
         files, state = self.snapshot()
         self.assertEqual(files["settings.json"], b'{"count":3}\n')
@@ -75,6 +77,9 @@ class ExportTests(unittest.TestCase):
         self.assertIn("settings.jsonic.style", files)
         self.assertIn(".editorconfig", files)
         self.assertIn(".gitignore", files)
+        self.assertEqual(files["fixtures/sample.zip"], b"real project data")
+        self.assertNotIn("JSONIC-snapshot.zip", files)
+        self.assertIn("JSONIC-snapshot.zip", state["excluded"])
         for prefix in (".git/", "__pycache__/", "node_modules/", "build/"):
             self.assertFalse(any(path.startswith(prefix) for path in files))
         self.assertEqual(state["branch"], "main")
@@ -99,7 +104,7 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(files["new.json"], b'{"changed":true}')
         self.assertNotIn("snapshot.zip", files)
         self.assertIn("snapshot.zip", state["excluded"])
-        self.assertFalse(list(self.repo.glob(".jsonic-export-*.zip")))
+        self.assertFalse(list(self.repo.glob(".export-*.zip")))
 
     def test_symlinks_record_targets_without_reading_outside_content(self):
         secret = self.work / "outside.txt"
@@ -119,7 +124,7 @@ class ExportTests(unittest.TestCase):
         self.assertNotIn(secret.read_bytes(), b"".join(files.values()))
 
     def test_launcher_symlink_uses_script_repository_instead_of_working_directory(self):
-        script = self.repo / "jsonic-export"
+        script = self.repo / "export.py"
         shutil.copyfile(PROGRAM, script)
         launcher = self.work / "launcher"
         try:
@@ -134,6 +139,23 @@ class ExportTests(unittest.TestCase):
             state = json.loads(archive.read("project-state.json"))
         self.assertEqual(state["repository"], str(self.repo.resolve()))
 
+    def test_no_arguments_export_beside_scripts_and_ignored_snapshot_keeps_git_clean(self):
+        script = self.repo / "export.py"
+        shutil.copyfile(PROGRAM, script)
+        self.file(".gitignore", b"/JSONIC-snapshot.zip\n")
+        self.file("correct.json", b'{}')
+        self.git("add", ".")
+        self.git("commit", "-m", "Project with local export")
+        output = self.repo / "JSONIC-snapshot.zip"
+        for _ in range(2):
+            result = self.cli(program=script)
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+            self.assertEqual(result.stdout.decode().strip(), str(output))
+            with zipfile.ZipFile(output) as archive:
+                self.assertIn("correct.json", archive.namelist())
+                self.assertNotIn("JSONIC-snapshot.zip", archive.namelist())
+            self.assertEqual(self.git("status", "--porcelain"), b"")
+
     @unittest.skipUnless(os.name == "posix", "POSIX executable permission bits")
     def test_executable_permissions_are_recorded_and_preserved_in_zip(self):
         executable = self.file("run", b'#!/bin/sh\nexit 0\n')
@@ -146,20 +168,20 @@ class ExportTests(unittest.TestCase):
     def test_errors_are_concise_and_keep_previous_snapshot(self):
         self.output.write_bytes(b"previous snapshot")
         for args in (
-            ["--repo", self.work / "missing"],
-            ["--repo", self.work],
-            ["--repo", self.repo, "-o", self.repo / ".git" / "bad.zip"],
-            ["--repo", self.repo, "-o", self.repo / "settings.json"],
+            ["--project", self.work / "missing"],
+            ["--project", self.work],
+            ["--project", self.repo, "-o", self.repo / ".git" / "bad.zip"],
+            ["--project", self.repo, "-o", self.repo / "settings.json"],
         ):
             with self.subTest(args=args):
                 result = self.cli("-o", self.output, *args)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, b"")
-                self.assertIn(b"jsonic-export: error:", result.stderr)
+                self.assertIn(b"export.py: error:", result.stderr)
                 self.assertNotIn(b"Traceback", result.stderr)
                 self.assertEqual(self.output.read_bytes(), b"previous snapshot")
         self.file("project-state.json/original", b"preserve this directory")
-        result = self.cli("--repo", self.repo, "-o", self.output)
+        result = self.cli("--project", self.repo, "-o", self.output)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b"Reserved snapshot filename", result.stderr)
         self.assertEqual(self.output.read_bytes(), b"previous snapshot")

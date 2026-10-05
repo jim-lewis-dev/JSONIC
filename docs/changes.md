@@ -2,8 +2,19 @@
 
 This audit compares the latest executable in the original JSONIC directory
 with the cleaned executable. It distinguishes defects from requested behavior
-and implementation choices. The comparison/update-tool work did not make new
-changes to the JSON parser or its file-writing policy.
+and implementation choices.
+
+The current maintenance cleanup puts executable `update.py` and `export.py`
+inside the project. Updates require a clean Git tree, including unrelated
+nonignored untracked files. Exports remain read-only and can capture local edits;
+their default snapshot stays inside the project and is ignored by Git.
+JSONIC's data operations are unchanged by this cleanup.
+
+The preceding changes added token-preserving `--pretty` output and made new files
+respect the process umask. Existing mode preservation and symlink-following
+remain. Duplicate keys stay rejected; all three comment forms stay supported.
+The README, installation instructions, and interview demo are shorter and
+include pretty-output restoration. Four focused tests were added.
 
 ## Defect corrections
 
@@ -33,6 +44,7 @@ file and used atomic replacement.
 | Object comments keyed by path | Existing behavior retained. | Rename/move changes the path; it does not automatically move the comment. Text after a comma belongs to the next key. |
 | `--raw`, `--mini`, `--minified` | Added aliases for the same compact operation. | Familiar names without multiple implementations. |
 | `--strip` | Added removal of comments alone, preserving other whitespace and CR/LF bytes. | Preserves line endings, but not the column width occupied by removed comments. |
+| `--pretty` | Added fixed two-space formatting of ordinary JSON, preserving token bytes and key order. | Convenient readable JSON; intentionally replaces layout and line endings. Capture first to restore the original presentation. |
 | One current style representation | Removed the format marker and its gate. | No migration machinery. Old incompatible captures should be recreated from the annotated source. |
 | Exact token bytes | Existing scanner retained. | Preserves spellings inside JSONIC; cannot reverse rounding or rewriting by another tool. |
 | Empty containers | Existing attachment rule retained. | Interior style applies while the container is empty; it cannot be fitted inside a replacement scalar. |
@@ -54,8 +66,8 @@ is not implemented.** These are separate claims.
 | Situation | Current behavior | Good / bad |
 | --- | --- | --- |
 | Existing file with mode `0640` | Stays `0640` on POSIX; reproduced against the old `0600` result. | Keeps existing owner/group access bits. |
-| New output file | Created as `0600`: owner read/write only. | Private by default, but another account/service cannot read it. This is inherited from the original temporary-file approach. |
-| Symlink output | Resolves the link and replaces its target; the link remains. | Behaves like ordinary writing through a link, but can affect a target outside the apparent output directory. This was a discretionary change, not a user-specified rule. |
+| New output file | Created with `0666` filtered by the process umask, typically `0644` or `0600`. | Normal file-creation behavior. This replaces the inherited unconditional `0600`; use umask `077` for private new files. |
+| Symlink output | Resolves the link and replaces its target; the link remains. | Behaves like ordinary writing through a link, but can affect a target outside the apparent output directory. Retained under the user's delegated choice. |
 | Hardlink output | Replaces one path with a new inode; other links keep the old contents. | Atomic replacement avoids partial data but does not act like writing through a shared inode. Inherited and reproduced. |
 | Extended attributes | Existing attributes are not copied; loss reproduced. | Small implementation, but unsuitable if those attributes must survive. |
 | Owner, group, ACL | Not explicitly preserved; temporary-file/directory defaults apply. | Mode bits alone do not reproduce all access policy. These cases were source-inspected, not independently exercised under multiple accounts. |
@@ -65,26 +77,29 @@ is not implemented.** These are separate claims.
 `0600` means owner read/write. `0644` additionally gives everyone read access.
 `0640` additionally gives only the file's group read access.
 
-My recommendation is to keep preserving existing mode bits and keep atomic
-replacement for ordinary configuration files. If new files should behave like
-ordinary shell-created files, change that rule explicitly to respect the
-process umask. Following symlinks is a reasonable convenience, but remains a
-choice worth confirming. An owner/ACL/xattr preservation subsystem should be
-added only if the actual use case needs it.
+The settled behavior is atomic replacement, existing mode-bit preservation,
+new-file umask, and following output symlinks. Temporary creation starts with
+the destination's mode filtered by umask; exact existing bits return after
+writing. New files use exclusive
+creation with normal permissions, without temporarily changing the process
+umask. Full filesystem metadata preservation is outside the current contract.
 
 Invalid input produces no partial output and leaves an existing file alone.
 That does not mean every I/O failure delivers zero bytes: writing to stdout
 can fail after some bytes have already reached a pipe.
 
-## The update tool is separate
+## Project maintenance is separate
 
-`jsonic-update` installs source files with the archive's executable/nonexecutable
-mode, stages its own paths, and commits them. It does not change JSONIC's data
-file permission policy. ZIP removal happens after the change is recorded in
-Git. See [the update workflow](updates.md).
+`./update.py` installs source files with the archive's executable/nonexecutable
+mode, stages the changed paths, and commits them. Any nonignored staged,
+unstaged, or untracked work stops it before application, even if unrelated to
+the update. It never makes a checkpoint commit, stash, or reset automatically.
+ZIP removal follows a successful local commit. A missing default download is
+a friendly no-op. See [the update workflow](updates.md).
 
-The latest support-tool changes add `jsonic-export` for sharing actual project
-files and Git state, make a missing default download a friendly no-op, and
-preserve the full name **JavaScript Object Notation with Integrated Comments**.
-The comment grammar, duplicate-key rule, formatting, and data-file permission
-policies are unchanged by these support-tool changes.
+`./export.py` shares the actual project files and Git state without changing
+them, including dirty work and useful ignored configuration/style files. Its
+default output is `JSONIC-snapshot.zip` inside the project, excluded from Git
+and subsequent exports. Both utilities live in the project; the old command
+files are removed. Neither changes JSONIC's comment handling or data-file
+permission policy.
