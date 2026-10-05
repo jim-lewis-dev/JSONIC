@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path, PurePosixPath
+import shlex
 import stat
 import subprocess
 import sys
@@ -156,7 +157,7 @@ def apply_update(repo, archive):
         raise
     archive.unlink()
     print("Update is recorded in Git. Removed the downloaded ZIP.")
-    print("Test it now: cd %s && python3 -m unittest discover -s tests -v" % repo)
+    print("Test it now: cd %s && python3 -m unittest discover -s tests -v" % shlex.quote(str(repo)))
 
 
 def main(argv=None):

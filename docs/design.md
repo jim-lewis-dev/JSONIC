@@ -1,47 +1,48 @@
 # How JSONIC works
 
-JSONIC separates **what the data says** from **how the file is presented**.
-The data goes to ordinary JSON software. A companion `.jsonic.style` file
-remembers the comments and whitespace so JSONIC can restore them afterward.
+JSONIC separates the JSON data from its presentation. A companion
+`.jsonic.style` file records comments and whitespace at structural addresses.
+Other software edits ordinary JSON; applying the capture inserts presentation
+at the addresses that still exist.
 
-## The mechanism
+## One byte-oriented scanner
 
-The scanner reads UTF-8 bytes and recognizes strings, numbers, punctuation,
-literal values, and gaps between tokens. It understands quoted strings, so a
-URL or the text `/* example */` inside a string is never mistaken for a comment.
+The scanner validates UTF-8, JSON strings, numbers, punctuation, literals, and
+gaps between tokens. Comment markers inside strings are data. Numbers and
+strings are copied as tokens, avoiding numeric conversion and escape rewriting.
 
-- **Capture** validates the document and records its gaps by object path,
-  member key, and array position. It writes presentation metadata, not data.
-- **Raw** validates the document and emits its original JSON tokens, removing
-  gaps. Numbers and strings are copied, not decoded and serialized again.
-- **Strip** validates the document and removes comment bytes, retaining
-  whitespace outside comments and CR/LF bytes inside them.
-- **Pretty** validates through the same grammar, then copies its original
-  tokens with two-space indentation, LF line endings, and a final newline.
-  Empty containers stay `{}`/`[]`. Comments are removed; no style is captured.
-- **Apply** validates the new data and inserts saved gaps at matching locations.
-  It validates the resulting annotated document before emitting it.
+| Operation | Behavior |
+| --- | --- |
+| Capture | Record gaps by path/key/index. Always replace the style file, even with an empty `{}` capture. |
+| Raw | Emit the original JSON tokens without comments or outside whitespace. |
+| Strip | Delete comment bytes, keeping outside whitespace and CR/LF bytes within comments. |
+| Pretty | Emit original tokens with two-space indentation, LF, and a final newline. Empty containers stay inline. |
+| Apply | Insert captured gaps at matching addresses, then validate the restored document. |
 
-These operations share one scanner and grammar. Pretty adds formatting without
-decoding values into machine numbers or reserializing strings. The implementation reads
-whole files into memory and uses recursive traversal. It is intended for
-configuration and similar documents; excessive nesting gives a clear error.
-Large-file throughput has not been benchmarked.
+Capture writes presentation metadata, not a copy of the data. The other modes
+never update that capture. All operations read whole files into memory and use
+recursive traversal. Excessive nesting receives a clear error; this is not a
+streaming parser. Large-file throughput remains unbenchmarked.
 
-## Exact attachment rules
+## Comment syntax
 
-The supported comments are `//` through the next CR/LF or end of file,
-`/* ... */`, and `''' ... '''`. Both block forms can span lines and end at
-their first closing delimiter; comments do not nest. Markers inside JSON
-strings are ordinary data. `#`, `<!-- ... -->`, and other comment forms are
-not supported. Triple single quotes denote comments here, not string values.
+`.jsonic` accepts ordinary JSON plus these comments between tokens:
 
-Object-member gaps surround the key, colon, and value, keyed by the member's
-name within its object path. Text after a comma belongs before the next key.
-Renaming or moving a member changes that path; it is not identity matching.
+- `//` through the next CR/LF or end of file.
+- `/* ... */` through the first closing delimiter.
+- `''' ... '''` through the first closing delimiter.
 
-A useful convention is to put an entry's inline explanation after its complete
-value and before its comma:
+Blocks can span lines and do not nest. Triple quotes mark comments, not string
+values. `.json` accepts no comments. Neither extension enables trailing commas,
+unquoted keys, alternative numbers, or other syntax extensions.
+
+## Where presentation belongs
+
+Object-member gaps belong to their key within the object's path. Arrays use
+numeric positions, regardless of what values occupy those positions.
+Nested containers follow the same structural address rules.
+
+Put a member's inline note after its complete value and before its comma:
 
 ```jsonc
 {
@@ -50,90 +51,60 @@ value and before its comma:
 }
 ```
 
-That block comment belongs to `attempts`. Putting it after the comma would
-attach it to `enabled`. A `//` comment can occupy the same gap only if the
-comma appears on a following line, so `/* ... */` is clearer for inline notes.
-Comments around a field stay when its value changes type. Only presentation
-inside removed descendants has no matching location to restore.
+That note belongs to `attempts`, even if its value changes type. After-comma
+comments belong before the next entry. A line comment before a comma requires
+the comma on a following line; a block comment is clearer for inline notes.
 
-Array gaps belong before and after an element at its numeric position. If
-elements move, the comments stay at the positions. If the array gets shorter,
-absent positions receive nothing. If it grows, old positions retain their
-gaps, including any gap after the former last element. New positions have
-no captured indentation or comments.
+| Structural change | Restoration |
+| --- | --- |
+| Change a value or reorder object keys | Captured gaps follow the key at its path. |
+| Reorder or replace array elements | Captured gaps stay at their indices. |
+| Remove a key or shorten an array | Missing addresses receive nothing. No orphan footer is created. |
+| Add a key or grow an array | New addresses have no captured comments or indentation. |
+| Replace a container with a scalar | Outer member gaps survive; interior presentation has no address. |
+| Keep an empty container empty | Its captured interior presentation returns. |
 
-Nested objects and arrays use the same path rules. Document-leading and
-document-trailing presentation is retained. Presentation inside an empty
-container applies when that container is still empty. Replacing a container
-with a scalar cannot retain presentation that was inside that container.
+The gap after the former last array element remains at that index when the
+array grows. New entries can therefore look compact. JSONIC does not infer
+comment meaning or invent layout; edit the annotated file and recapture when
+new structure needs presentation.
 
-Applying a style does not erase its saved entries. If a missing key or
-position later returns and you apply the same capture, its old style can
-return too. Capture again to replace the saved presentation with the current
-annotated document. An empty capture writes `{}`, preventing stale comments
-from surviving a fresh capture.
+Paths use JSON Pointer escaping. An array index `0` and an object key `"0"`
+can produce the same descendant address. Matching descendant presentation can
+survive such an ancestor type change; container-specific gaps depend on the
+current container kind. Renaming or moving a member changes its address.
 
-## What exact restoration means
+Root-leading and root-trailing presentation is retained. Applying a capture
+does not erase missing entries from it: if an address later returns, its saved
+style can return. Capture again to replace the saved state. A removed comment
+stays removed after recapturing the edited annotated document.
 
-An unchanged token stream restores byte for byte: spaces, tabs, newlines,
-comments, number spelling, and string escapes. JSONIC preserves the token
-spellings presented to it; it cannot reverse rounding, reordering, or escape
-normalization performed by a different JSON program.
+## Exactness and limits
 
-Restoration is deterministic, not semantic. A comment can become outdated if
-its value changes. Newly inserted structure can look compact because no style
-exists for it. Edit and recapture when you want a new presentation.
+An unchanged token stream restores the entire original document byte for byte,
+including comment contents, tabs, blank-line spaces, line endings, number
+spelling, and string escapes. JSONIC preserves the tokens it receives; it cannot
+undo rounding, reordering, or normalization performed by external software.
+Comments may become outdated when values change.
 
-`--strip` preserves line endings, not original comment-column widths: deleting
-an inline block comment shifts later text left. Use capture/apply when you
-need the original appearance back.
+`--strip` preserves line endings, not the column widths occupied by removed
+comments. Capture/apply is the operation for restoring the original appearance.
 
-## Errors and file writes
+## Validation and file output
 
-Input must be syntactically valid, use UTF-8, and have unique object keys.
-`.jsonic` permits the documented comments; it does not enable trailing commas,
-unquoted keys, or alternative number syntax.
+Input must be UTF-8, syntactically valid, and have unique object keys. Equivalent
+escaped spellings count as duplicates. Uniqueness is an extra JSONIC integrity
+rule: the [JSON standard](https://www.rfc-editor.org/rfc/rfc8259#section-4)
+recommends it but its grammar permits duplicates. JSONIC rejects them because
+key-based attachment would be ambiguous.
 
-Unique keys are an additional JSONIC rule. [The JSON standard](https://www.rfc-editor.org/rfc/rfc8259#section-4)
-says names should be unique; its grammar permits duplicates, but implementations
-may keep the last value, reject the object, or retain every pair. JSONIC rejects
-duplicates to avoid silent data loss and ambiguous key-based style matching.
-Escaped spellings of the same decoded key count as duplicates.
-
-Output is computed before it is written. File output uses a temporary file in
-the destination directory, flushes it, then replaces the destination. Invalid
-input does not overwrite an existing output. Existing POSIX permission bits are
-retained; new files use ordinary creation permissions filtered by the process
-umask (typically `0644` with umask `022`, or `0600` with umask `077`). Output
-symlinks remain links and their targets are replaced. Owner/group, ACLs,
+Output is computed before file writing. Invalid input leaves existing outputs
+unchanged. Files are written through a temporary sibling and atomic replacement.
+Existing POSIX mode bits are preserved; new files respect the process umask.
+Output symlinks remain links and their targets are replaced. Owner/group, ACLs,
 extended attributes, and hardlink identity are not explicitly preserved.
-Capture refuses to overwrite its input, and apply refuses to overwrite its
-style file. Style files are intended to be generated by JSONIC.
+Atomic replacement is not a promise of power-loss durability.
 
-## Related tools
-
-The following comparison describes the linked projects' interfaces and our
-tested integration paths. Comment preservation and separate metadata are not
-unique to JSONIC. See the [detailed comparison](comparison.md) for whitespace,
-arrays, structural edits, validation, and practical costs.
-
-| Tool | Documented approach | Relationship to JSONIC |
-| --- | --- | --- |
-| [strip-json-comments](https://github.com/sindresorhus/strip-json-comments) | Removes comments, optionally substituting whitespace. | Covers removal; JSONIC also captures and restores presentation. |
-| [JSON5](https://json5.org/) | Adds comments and other syntax conveniences; exposes parse/stringify on values. | Broader authoring syntax. JSONIC retains ordinary JSON syntax except comments. |
-| [jsonc-parser](https://github.com/microsoft/node-jsonc-parser) | Scans, parses, formats, and applies targeted edits to commented JSON text. | Useful for editing the annotated source directly. |
-| [Hjson](https://github.com/hjson/hjson-js) | Offers round-trip comments and exported comment extraction/merge functions. | Can restore separately saved comments after ordinary JSON processing; formatting and missing-path policies differ. |
-| [comment-json](https://github.com/kaelzhang/node-comment-json) | Retains comments in enriched JavaScript objects and supports comment-aware operations. | A recursive adapter can transfer comments onto fresh JSON using its helpers; exact original whitespace is not recorded. |
-
-JSONIC supplies the complete capture/process/restore file workflow. Another
-program can rewrite ordinary JSON without participating in comment preservation;
-JSONIC then reapplies exact captured gaps under explicit path and position
-rules, skipping absent locations and inventing no new presentation.
-
-## Why this is an engineering project
-
-The difficult work is preserving syntax while changing presentation, defining
-what survives structural edits, and making failures predictable. Tests check
-exact expected bytes, ordinary JSON edits, missing keys, reordered and shortened
-arrays, comment-like strings, UTF-8, numeric spelling, and file replacement.
-Generated cases supplement fixed examples; they do not replace them.
+Capture cannot overwrite its input, and apply cannot overwrite its style file.
+Style files are generated captures. See [tests](testing.md) for the evidence
+and [comparisons](comparison.md) for different approaches to commented JSON.

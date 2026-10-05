@@ -2,11 +2,26 @@
 
 **JavaScript Object Notation with Integrated Comments.**
 
-Write comments beside your JSON. Let ordinary JSON tools change the data.
-Restore the comments and formatting afterward. One Python executable; no
-third-party dependencies.
+Keep explanations beside JSON values. Let ordinary JSON software change the
+data. Restore the comments and original formatting afterward.
 
-## How it works
+One Python executable, no third-party dependencies. JSON syntax stays JSON;
+`.jsonic` adds `//`, `/* ... */`, and `''' ... '''` comments between tokens.
+
+## See it work
+
+From the project directory:
+
+```bash
+python3 examples/demo.py
+```
+
+The demo edits settings with Python's normal JSON library, changes a positional
+array, and updates a nested configuration. It shows before/after output and
+checks the restored results. Everything it writes goes into a temporary directory.
+See the [worked examples](docs/examples.md) for commands and expected behavior.
+
+## The basic workflow
 
 Save this as `settings.jsonic`:
 
@@ -17,23 +32,24 @@ Save this as `settings.jsonic`:
 }
 ```
 
-Capture the presentation, then produce readable, comment-free JSON:
+Capture its presentation, then produce ordinary JSON:
 
 ```bash
 python3 jsonic settings.jsonic
 python3 jsonic settings.jsonic --pretty -o settings.json
 ```
 
-The capture creates `settings.jsonic.style`: comments, whitespace, and their
-locations. Let any JSON tool change `attempts` to `5` in `settings.json`. Restore:
+Capture creates `settings.jsonic.style`: comments, whitespace, and their
+locations. Let any JSON program change `attempts` to `5` in `settings.json`.
+Restore the saved presentation:
 
 ```bash
 python3 jsonic settings.json --apply -o restored.jsonic
 ```
 
-The value is now `5`; its comment and original spacing return. With unchanged
-data tokens, the whole file returns byte for byte. Capture **before** removing
-comments, and keep the style file.
+The value is now `5`, with its comment and spacing back in place. Capture
+**before** removing comments and keep the style file. With unchanged data tokens,
+the whole document restores byte for byte.
 
 ## Commands
 
@@ -41,44 +57,42 @@ Use `python3 jsonic FILE` with:
 
 | Option | Result |
 | --- | --- |
-| None | Capture into `<base>.jsonic.style`, replacing any previous capture. |
-| `--strip` | Remove comments; retain outside whitespace and all line endings. |
+| None | Capture into `<base>.jsonic.style`, replacing the previous capture. |
+| `--strip` | Remove comments; keep outside whitespace and all line endings. |
 | `--raw`, `--mini`, `--minified` | Remove comments and whitespace outside strings. |
-| `--pretty` | Remove comments; use two-space indentation, LF, and a final newline. |
-| `--apply [STYLE]` | Restore the named style, or `<base>.jsonic.style`. |
+| `--pretty` | Emit comment-free JSON with two-space indentation and a final newline. |
+| `--apply [STYLE]` | Restore the named capture, or `<base>.jsonic.style`. |
 
-Add `-o PATH` to write output; otherwise conversions print to the terminal.
-For capture, `-o` chooses the style file. Only capture writes style metadata.
-All conversions preserve data-token spelling and order.
+Use `-o PATH` for file output. Without it, conversions print to the terminal;
+capture writes its style file. Only capture changes style metadata.
 
-## Restoration rules
+## Predictable restoration
 
-- Objects match keys within their paths; arrays match positions, even after reordering.
-- Missing entries receive nothing. New entries receive no invented presentation.
-- `value /* comment */,` attaches to that member or position, including when
-  its value changes type. After the comma, comments belong to the next entry.
-- Presentation inside a removed container cannot follow a replacement scalar.
+- Object comments follow keys within their paths. Array comments follow indices,
+  even when values change or reorder. Missing entries receive nothing.
+- Put a member's note before its comma: `"attempts": 3 /* note */,`.
+  After-comma comments belong to the next entry.
+- New entries have no captured comments or indentation. Change the annotated
+  document and recapture when you want to record a new presentation.
+- JSONIC preserves the data tokens it receives. It cannot undo rounding or
+  rewriting by another program. Comments can become outdated when data changes.
 
-`.json` requires UTF-8 JSON with unique keys. `.jsonic` also permits `//`,
-`/* ... */`, and `''' ... '''` comments between tokens. Invalid input produces
-an error, a nonzero exit, and no replaced output. Use `-o` for in-place writes.
+Input must be UTF-8 and valid JSON with unique object keys; `.jsonic` additionally
+allows the documented comments. Invalid input produces a clear error, a nonzero
+exit, and no replaced file output.
 
-## Try it
+## Run, install, and verify
 
-[Install](INSTALL.md), then run from the project directory:
+Run directly with Python, or [copy the optional command](INSTALL.md) into your
+account's command directory. There is no installer or uninstall program.
 
 ```bash
-python3 examples/demo.py
 python3 -m unittest discover -s tests -v
 ```
 
-On Windows, use `py` instead of `python3`.
+[What the tests prove](docs/testing.md) · [Exact rules](docs/design.md) ·
+[Tool comparison](docs/comparison.md) · [Interview demo](docs/presenting.md)
 
-Examples: [simple](examples/settings.jsonic), [positional array](examples/priority-array.jsonic),
-[complex](examples/config.jsonic).
-
-Project maintenance: `./update.py` applies a downloaded update; `./export.py`
-writes `JSONIC-snapshot.zip` inside the project for review.
-
-[Exact rules](docs/design.md) · [Tool comparison](docs/comparison.md) ·
-[Interview demo](docs/presenting.md) · [Updates and snapshots](docs/updates.md).
+For local project maintenance, `./update.py` applies a downloaded change and
+`./export.py` writes `JSONIC-snapshot.zip` inside the project.
+See [updates and snapshots](docs/updates.md).

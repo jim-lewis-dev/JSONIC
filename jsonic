@@ -870,7 +870,7 @@ def main(argv):
         metavar="STYLE.jsonic.style",
         help="apply a .jsonic.style style to FILE.json or FILE.jsonic",
     )
-    ap.add_argument("-o", dest="output", help="output path (mode-dependent); otherwise writes to stdout or default metadata JSON object")
+    ap.add_argument("-o", dest="output", help="output path; defaults to a style file for capture, stdout for conversions")
     ap.add_argument("input", help="input file (.json or .jsonic)")
 
     # If invoked with no args (like "jsonic"), print the SAME help as "-h".

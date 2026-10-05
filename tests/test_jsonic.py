@@ -340,6 +340,17 @@ class JsonicTests(unittest.TestCase):
             with self.subTest(args=args):
                 self.assert_error(self.cli(*args))
 
+    def test_failed_atomic_replacement_preserves_output_and_cleans_temporary_file(self):
+        path = self.file("output.json", b'{"keep":"original"}\n')
+        before_files = set(self.work.iterdir())
+        before_mode = stat.S_IMODE(path.stat().st_mode)
+        with patch.object(jsonic.os, "replace", side_effect=PermissionError("replacement refused")):
+            with self.assertRaisesRegex(PermissionError, "replacement refused"):
+                jsonic.atomic_write_bytes(str(path), b'{"keep":"changed"}\n')
+        self.assertEqual(path.read_bytes(), b'{"keep":"original"}\n')
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), before_mode)
+        self.assertEqual(set(self.work.iterdir()), before_files)
+
     def test_in_place_operations_preserve_mode_and_restore_capture(self):
         original = b'/*header*/{\n "x": 1 /*tail*/\n}\n'
         path = self.file("in-place.jsonic", original)

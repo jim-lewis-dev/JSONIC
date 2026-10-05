@@ -21,7 +21,7 @@
 
     "labels": { "日本語": "こんにちは", "units": "µs" },
     "path/with~characters": { "": "an empty key is legal" },
-    "empty_options": { /* nothing configured yet */ },
+    "empty_options": { /* nothing configured yet */ } /* Optional overrides; false disables them. */,
     "empty_queue": [ ''' no queued work ''' ],
     "escaped_text": "quote=\" slash=\/ backslash=\\ newline=\n"
 }

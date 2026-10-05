@@ -1,11 +1,24 @@
-# Install JSONIC
+# Run or install JSONIC
 
-JSONIC needs Python and the single file named `jsonic`. No pip, extra packages,
-account, or network connection is needed to run it.
+JSONIC is the single Python executable named `jsonic`. It needs no extra
+packages. Git is needed only for the project's update and export tools.
 
-## Ubuntu and Raspberry Pi OS
+## Start without installing
 
-From the project directory, install the command for your account:
+From this project directory:
+
+```bash
+python3 jsonic --help
+python3 examples/demo.py
+```
+
+You can copy `jsonic` to another computer and run it with Python there. Examples,
+tests, and documentation are useful project files, not runtime dependencies.
+
+## Optional Ubuntu command
+
+To make `jsonic` available from any directory, copy it into your account's
+command directory:
 
 ```bash
 mkdir -p "$HOME/.local/bin" &&
@@ -13,79 +26,44 @@ install -m 755 jsonic "$HOME/.local/bin/jsonic" &&
 "$HOME/.local/bin/jsonic" --help
 ```
 
-Then use `jsonic input.jsonic --pretty`, for example. If `jsonic` is not found,
-add the following line to `~/.bashrc` and open a new terminal. Running it in the
-current terminal also makes the command available immediately:
+If the command is not found, add this line to `~/.bashrc` and open a new terminal:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-If Python is missing, install it first:
+If Python is missing, install it with `sudo apt install python3`.
+After updating the project and testing it, repeat the copy command above to
+refresh the optional installed copy.
+
+Removal is just deleting the copy you installed:
 
 ```bash
-sudo apt update && sudo apt install python3
+rm -- "$HOME/.local/bin/jsonic"
 ```
 
-Starting with a downloaded ZIP on a new computer? Extract it first:
+There is no installer, service, package manager integration, or uninstall
+program. JSON documents and captured style files are separate from the command.
 
-```bash
-mkdir -p "$HOME/projects/jsonic" &&
-python3 -m zipfile -e "$HOME/Downloads/JSONIC.zip" "$HOME/projects/jsonic" &&
-rm -f "$HOME/projects/jsonic/update.json" &&
-cd "$HOME/projects/jsonic"
-```
+## Other computers
 
-Run the install block above from there. For the existing development repository,
-run `./update.py` as described in [the update workflow](docs/updates.md).
-
-## Run without installing
-
-From the project directory:
-
-```bash
-python3 jsonic --help
-python3 examples/demo.py
-python3 -m unittest discover -s tests -v
-```
-
-From elsewhere, use `python3 /path/to/jsonic input.jsonic --raw -o output.json`.
-The examples and tests are useful checks, but are not runtime dependencies.
-
-## macOS and Windows
-
-On **macOS**, install Python from [python.org](https://www.python.org/downloads/macos/)
-if needed. The extraction and installation commands above also apply. Put the
-PATH line in `~/.zshrc` if using zsh.
-
-On **Windows**, install Python using the [official instructions](https://docs.python.org/3/using/windows.html),
-extract the ZIP, and open a terminal in that directory:
+On macOS, use `python3 /path/to/jsonic input.jsonic --pretty`. On Windows, use:
 
 ```powershell
-py jsonic --help
-py examples/demo.py
-py -m unittest discover -s tests -v
-py jsonic examples/settings.jsonic --pretty -o settings.json
+py C:\path\to\jsonic input.jsonic --pretty -o output.json
 ```
 
-From elsewhere, use `py "C:\path\to\jsonic" input.jsonic --raw -o output.json`.
-The executable needs no `.py` extension. Use `-o` so JSONIC writes exact bytes.
-Linux is verified; native macOS and Windows runs remain unverified.
+Install Python from [python.org](https://www.python.org/downloads/) if needed.
+Use `-o` for file output so JSONIC controls the bytes it writes. Linux has been
+verified; native macOS and Windows runs still need verification.
 
-## Copy, update, remove
+## Development ZIPs
 
-- **Another computer:** copy `jsonic`, or the whole project, and use Python there.
-- **Update:** update the source, run its tests, and repeat the install block to
-  replace the installed copy.
-- **Remove:** delete `$HOME/.local/bin/jsonic`, or the copy placed elsewhere.
-  Your JSON and style files remain independent.
+A downloaded `JSONIC.zip` contains the project source. For a fresh copy, extract
+it into an empty directory and run the commands above. `update.json` is only
+an instruction for the local development updater: a commit message and explicit
+file removals. It is not needed to run JSONIC and can be discarded after a
+fresh extraction.
 
-A development ZIP may include `update.json` with two fields: `message` is the
-local commit message; `remove` lists project files to delete explicitly. The
-development updater consumes it. It is unrelated to `.jsonic.style` files,
-is unnecessary at runtime, and can be discarded for a normal installation.
-
-The executable `update.py` and `export.py` utilities stay in the project and
-run directly from there. Export writes `JSONIC-snapshot.zip` beside them.
-
-The unrelated npm package named `jsonic` is not this tool.
+In an existing committed development repository, use `./update.py` rather
+than extracting over local work. See [updates and snapshots](docs/updates.md).
