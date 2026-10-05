@@ -37,14 +37,11 @@ and manual requests. Linux runs the complete suite and demo. macOS and Windows
 run the JSONIC core and example suites plus the demo; maintenance utilities
 target the local POSIX workflow. Each runner uses the current stable Python.
 
-The workflow is included and locally reviewed. Native macOS/Windows support is
-confirmed only after those jobs actually pass on GitHub. The Actions tab shows
-the result for each operating system; a workflow file alone is not a passed test.
+[View the latest results and per-platform logs](https://github.com/jim-lewis-dev/JSONIC/actions/workflows/tests.yml).
 
 ## What is still unproven
 
 Finite tests cannot prove every possible document or I/O failure. The suite
 is not a performance benchmark, a power-loss test, or a proof of full filesystem
-metadata preservation. Linux is exercised; native macOS and Windows remain
-unverified. External JSON software can still change numeric precision or token
-spelling before restoration.
+metadata preservation. External JSON software can still change numeric precision
+or token spelling before restoration.

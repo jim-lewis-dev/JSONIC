@@ -2,9 +2,8 @@
 
 **JavaScript Object Notation with Integrated Comments.**
 
-Keep configuration comments and formatting when existing software rewrites
-JSON. JSONIC saves the presentation, exports ordinary JSON, and restores the
-presentation around the updated data.
+Write JSON with comments and your own formatting. Save the comments and spacing,
+strip to standard JSON, use or edit it, then restore the comments and formatting.
 
 One Python executable, no third-party dependencies. JSON syntax stays JSON;
 `.jsonic` adds `//`, `/* ... */`, and `''' ... '''` comments between tokens.
@@ -20,7 +19,7 @@ Save this as `settings.jsonic`:
 }
 ```
 
-Capture its presentation, then produce ordinary JSON:
+Save its comments and formatting, then produce standard JSON:
 
 ```bash
 python3 jsonic settings.jsonic
@@ -28,8 +27,8 @@ python3 jsonic settings.jsonic --pretty -o settings.json
 ```
 
 Capture creates `settings.jsonic.style`: comments, whitespace, and their
-locations. Let any JSON program change `attempts` to `5` in `settings.json`.
-Restore the saved presentation:
+locations. Change `attempts` to `5` in `settings.json` using an editor or program.
+Restore the saved comments and formatting:
 
 ```bash
 python3 jsonic settings.json --apply -o restored.jsonic
@@ -92,7 +91,8 @@ an array, and change nested configuration. It checks exact restoration and edite
 data; outputs stay in temporary files. [Worked examples](docs/examples.md).
 
 [Install or run directly](INSTALL.md). On Windows, use `py` instead of `python3`.
-Linux is exercised; native macOS/Windows and large-file throughput remain unverified.
+Core tests and examples run on Linux, macOS, and Windows in
+[GitHub Actions](https://github.com/jim-lewis-dev/JSONIC/actions/workflows/tests.yml).
 
 [What the tests prove](docs/testing.md) · [Exact rules](docs/design.md) ·
 [Tool comparison](docs/comparison.md) · [Interview demo](docs/presenting.md)

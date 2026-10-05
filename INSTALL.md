@@ -54,8 +54,10 @@ py C:\path\to\jsonic input.jsonic --pretty -o output.json
 ```
 
 Install Python from [python.org](https://www.python.org/downloads/) if needed.
-Use `-o` for file output so JSONIC controls the bytes it writes. Linux has been
-verified; native macOS and Windows runs still need verification.
+Use `-o` for file output so JSONIC controls the bytes it writes. Core tests and
+examples run on Linux, macOS, and Windows in
+[GitHub Actions](https://github.com/jim-lewis-dev/JSONIC/actions/workflows/tests.yml).
+The update and export utilities target the Ubuntu/POSIX development workflow.
 
 ## Development ZIPs
 

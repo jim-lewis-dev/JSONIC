@@ -31,6 +31,9 @@ python3 -m unittest discover -s tests -v
 python3 examples/demo.py
 ```
 
+After tests pass, publish the commit to the configured GitHub remote with
+`git push`. GitHub then runs the automated checks.
+
 A missing default download reports “No update waiting.” An identical update
 is removed without an empty commit. An explicitly named missing ZIP is an error.
 
