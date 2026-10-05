@@ -20,6 +20,8 @@ The repository must have an existing commit and configured Git author identity.
 Any nonignored staged, unstaged, or untracked work stops the update before
 application, including unrelated files. Commit, remove, or move that work
 yourself. The updater never checkpoints, stashes, or resets it.
+An unfinished merge, rebase, cherry-pick, or revert also stops the update,
+even if the working tree looks clean. Finish or abort that operation first.
 
 Inspect and test the resulting commit:
 

@@ -10,6 +10,8 @@ observations on October 3, 2026. They describe the tested JavaScript packages,
 not every Hjson implementation or future release. Here, comment-json means the
 [npm JavaScript project](https://github.com/kaelzhang/node-comment-json), not
 Python's similarly named library.
+The automated suite in this repository verifies JSONIC only; these comparisons
+are dated research findings, not a maintained benchmark of the other tools.
 
 ## Features that matter
 

@@ -22,13 +22,24 @@ repositories, not your documents or project history.
 | Input errors | Invalid JSON, duplicate keys, bad UTF-8, and excessive nesting fail clearly; existing file outputs are unchanged. |
 | File output | Existing POSIX mode bits, new-file umask, output symlinks, and in-place conversions behave as documented. |
 | Update/export | Disposable repositories check clean-tree refusal, one update commit, ZIP cleanup, actual snapshot contents, and snapshot placement. |
-| Generated documents | Repeatable combinations of values and comment gaps supplement the fixed cases. A thousand-record case checks ordinary scale. |
+| Generated documents | Repeatable combinations of values and comment gaps supplement the fixed cases. Structural edits check target tokens, repeated application, and capture reuse. A thousand-record case checks ordinary scale. |
 
 Round trips are strong evidence for preservation, but they are not enough on
 their own: two complementary mistakes could cancel each other. Fixed byte
 expectations and independently decoded JSON data check the individual operations.
 The runnable examples exercise the public command line and demonstrate the
 same contracts with meaningful configurations.
+
+## Automatic checks on GitHub
+
+The [test workflow](../.github/workflows/tests.yml) runs on pushes, pull requests,
+and manual requests. Linux runs the complete suite and demo. macOS and Windows
+run the JSONIC core and example suites plus the demo; maintenance utilities
+target the local POSIX workflow. Each runner uses the current stable Python.
+
+The workflow is included and locally reviewed. Native macOS/Windows support is
+confirmed only after those jobs actually pass on GitHub. The Actions tab shows
+the result for each operating system; a workflow file alone is not a passed test.
 
 ## What is still unproven
 

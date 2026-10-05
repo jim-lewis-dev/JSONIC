@@ -108,6 +108,13 @@ def apply_update(repo, archive):
     git(repo, "rev-parse", "--verify", "HEAD")
     if git(repo, "status", "--porcelain", "--untracked-files=all"):
         raise UpdateError("Repository has uncommitted or untracked work. Commit, remove, or ignore it, then run again.")
+    for operation in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
+                      "rebase-merge", "rebase-apply", "sequencer"):
+        marker = Path(git(repo, "rev-parse", "--git-path", operation))
+        if not marker.is_absolute():
+            marker = repo / marker
+        if marker.exists():
+            raise UpdateError("Repository has an unfinished Git operation. Finish or abort it before updating.")
     git(repo, "var", "GIT_AUTHOR_IDENT")
     git(repo, "var", "GIT_COMMITTER_IDENT")
 

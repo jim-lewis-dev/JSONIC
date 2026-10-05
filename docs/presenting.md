@@ -1,55 +1,55 @@
 # Presenting JSONIC
 
-## A two-minute demonstration
+JSONIC demonstrates a precise contract: preserve human explanations while
+existing software processes ordinary JSON.
 
-Run `python3 examples/demo.py` and explain the results:
+## A 60–90 second demonstration
 
-1. **The problem:** configuration needs explanations, but existing tools expect
-   ordinary JSON. A comment should survive an unrelated data edit.
-2. **The mechanism:** capture comments and whitespace in a companion style
-   file, then emit ordinary JSON. The next program needs no JSONIC integration.
-3. **The useful edit:** Python's normal JSON library changes settings. Restoring
-   the capture brings the presentation back around the new values.
-4. **The array rule:** comments describe positions. Changed/reordered values
-   keep positional notes, shortened arrays omit missing notes, and added
-   positions do not receive invented comments.
-5. **The deeper case:** nested configuration demonstrates keys, paths, arrays,
-   removals, and value-type changes together.
+Run `python3 examples/demo.py`, then point to three results:
 
-Use [worked examples](examples.md) for slower walkthroughs and
-[the test guide](testing.md) for the evidence.
+1. **Setting changed, explanation retained.** “A configuration file documents
+   why a setting exists. JSONIC captures those comments and spaces, exports
+   ordinary JSON, and restores the presentation after Python changes the value.
+   The consuming program needs no comment-aware integration.”
+2. **Array behavior is deliberate.** “These comments describe priority slots.
+   Reordering values keeps comments at their positions; shortening the array
+   omits missing slots. New entries receive no invented presentation.”
+3. **Limits are visible.** “The nested example changes values and structure.
+   A field's outer note survives a type change; removed interior notes do not.
+   Python normalizes a number's spelling, and JSONIC preserves what Python
+   returned. It cannot recover information another program discarded.”
 
-## Engineering decisions worth discussing
+Finish with the evidence: unchanged tokens round-trip byte for byte; independent
+expected documents and decoded JSON verify edited results. The demo leaves no
+files behind. Use [worked examples](examples.md) for a slower walkthrough.
 
-- **Bytes rather than reserialization:** copy validated tokens so numbers and
-  escapes survive. JSONIC does not turn `9007199254740993` into a machine float.
-- **Explicit attachment rather than guessing:** paths and indices make behavior
-  predictable after edits. The tool cannot know whether a comment is still true.
-- **Separate presentation:** ordinary JSON software can operate without retaining
-  comment-aware objects or metadata in its own data model.
-- **Small scope:** one executable, no dependencies, explicit syntax and file
-  behavior. Whole-file parsing trades streaming capacity for simpler code.
-- **Independent checks:** exact expected bytes and decoded data supplement round
-  trips, because round trips alone can conceal paired mistakes.
+## Questions to prepare for
 
-A note after a complete value and before its comma belongs to that entry:
-`"setting": [] /* explanation */,`. Interior comments cannot survive replacing
-that container with a scalar. New paths have no stored layout. External tools
-can still discard number precision; restoration cannot reconstruct lost data.
+| Interview question | Answer grounded in the implementation |
+| --- | --- |
+| Why not just parse and serialize JSON? | That can change numeric spelling, precision, escapes, and formatting. The scanner validates syntax and copies value tokens as bytes; decoded object keys are used for matching. |
+| How do you decide which comment belongs where? | Capture records gaps at structural paths. Object members match keys; array elements match indices. A note before the comma belongs to the current entry, regardless of its value's type. |
+| Why a separate style file? | Ordinary JSON tools can rewrite data without preserving special in-memory objects. Applying the saved capture restores matching presentation afterward. |
+| How do you know a round trip is correct? | Round trips alone can hide paired bugs. Tests also compare complete, independently specified output, decode edited JSON, exercise CLI failures, and check atomic-replacement failure cleanup. |
+| What does atomic output guarantee? | A file is prepared in a temporary sibling and replaced after writing succeeds. Invalid input leaves existing output alone. This does not promise full metadata preservation or power-loss durability. |
 
-## Claims to make accurately
+[Design details](design.md) and [test evidence](testing.md) support these answers.
 
-JSONIC provides a complete capture → ordinary JSON → restore command-line
-workflow with exact presentation recovery when tokens are unchanged. Separate
-comment metadata and comment preservation are not unique inventions; competing
-tools make different tradeoffs. See [the comparison](comparison.md).
+## Keep the claims precise
 
-Linux and the documented examples are exercised. Native macOS/Windows and
-large-file throughput remain unverified. Describe these limits plainly.
+Hjson and comment-json also preserve comments; separate metadata is not unique.
+JSONIC combines a complete file workflow with exact captured gaps, token
+preservation, and explicit key/index rules. The [comparison](comparison.md)
+describes measured differences without claiming universal superiority.
+
+Comments can become outdated, new structure lacks captured indentation, and
+missing entries remain in the saved capture until recapture. Parsing uses
+whole-file buffers and recursion. Large-file throughput and native macOS/Windows
+remain unverified; Linux and the runnable examples are exercised.
 
 ## Résumé summary
 
-> Built a dependency-free Python CLI that separates comments and formatting
-> from JSON data and restores them after ordinary JSON processing; implemented
-> byte-preserving parsing, deterministic key/index matching, atomic file output,
-> and tests for exact round trips, structural edits, and failure behavior.
+> Built a dependency-free Python CLI that restores JSON comments and formatting
+> after ordinary JSON processing; implemented byte-preserving parsing,
+> deterministic key/index matching, atomic file output, and tests covering exact
+> round trips, structural edits, and failure behavior.

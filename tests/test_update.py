@@ -77,6 +77,28 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.git("rev-list", "--count", "HEAD"), "1")
         self.assertFalse(self.archive.exists())
 
+    def test_clean_working_tree_with_pending_merge_is_left_untouched(self):
+        self.git("switch", "-c", "topic")
+        self.git("commit", "--allow-empty", "-m", "An independent branch commit")
+        self.git("switch", "main")
+        self.git("merge", "--no-ff", "--no-commit", "topic")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.package()
+        before_head = self.git("rev-parse", "HEAD")
+        index = self.repo / ".git" / "index"
+        merge = self.repo / ".git" / "MERGE_HEAD"
+        before_index = index.read_bytes()
+        before_merge = merge.read_bytes()
+        before_archive = self.archive.read_bytes()
+        result = self.run_update()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unfinished Git operation", result.stderr)
+        self.assertEqual((self.repo / "existing.txt").read_text(), "original\n")
+        self.assertEqual(self.git("rev-parse", "HEAD"), before_head)
+        self.assertEqual(index.read_bytes(), before_index)
+        self.assertEqual(merge.read_bytes(), before_merge)
+        self.assertEqual(self.archive.read_bytes(), before_archive)
+
     def test_no_download_waiting_is_a_friendly_noop(self):
         loader = importlib.machinery.SourceFileLoader("jsonic_update", str(UPDATER))
         spec = importlib.util.spec_from_loader(loader.name, loader)

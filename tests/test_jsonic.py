@@ -214,6 +214,14 @@ class JsonicTests(unittest.TestCase):
         self.assertEqual(self.restore(source, b'{"b":20,"c":30}'), b'{/*b*/"b":20,"c":30}')
         self.assertEqual(self.restore(source, b'{}'), b'{}')
 
+    def test_equivalent_key_spellings_match_comments_after_reordering(self):
+        source = br'{/*letter*/"\u0061":1,/*rocket*/"\ud83d\ude80":2,/*path*/"a\/b":3}'
+        target = '{"a/b":30,"🚀":20,"a":10}'.encode()
+        expected = '{/*path*/"a/b":30,/*rocket*/"🚀":20,/*letter*/"a":10}'.encode()
+        restored = self.restore(source, target)
+        self.assertEqual(restored, expected)
+        self.assertEqual(jsonic.strip_document(restored, allow_comments=True), target)
+
     def test_comment_after_comma_follows_next_key(self):
         source = b'{"a":1, // before b\n"b":2}'
         self.assertEqual(self.restore(source, b'{"b":3}'), b'{ // before b\n"b":3}')
@@ -473,10 +481,35 @@ class JsonicTests(unittest.TestCase):
             with self.subTest(case=case):
                 source = gap() + document() + gap()
                 raw = self.roundtrip(source)
-                json.loads(raw)
+                data = json.loads(raw)
                 pretty = jsonic.pretty_document(source, allow_comments=True)
                 self.assertEqual(jsonic.strip_document(pretty, allow_comments=False), raw)
                 self.assertEqual(jsonic.pretty_document(pretty, allow_comments=False), pretty)
+                if case % 10 == 0:
+                    # An ordinary JSON serializer produces the edited target.
+                    if isinstance(data, dict):
+                        edited = dict(reversed(list(data.items())))
+                        if edited:
+                            edited.pop(next(iter(edited)))
+                        edited["new"] = [{"value": case}, []]
+                    elif isinstance(data, list):
+                        edited = list(reversed(data[1:])) + [{"new": case}]
+                    else:
+                        edited = {"value": data, "new": [{}, case]}
+                    target = json.dumps(edited, ensure_ascii=False, separators=(",", ":")).encode()
+                    style = self.capture(source)
+                    path = self.file("edited.json", target)
+                    restored = jsonic.cmd_apply_to_bytes(str(path), str(style), allow_comments=False)
+                    self.assertEqual(jsonic.strip_document(restored, allow_comments=True), target)
+                    path = self.file("restored.jsonic", restored)
+                    self.assertEqual(
+                        jsonic.cmd_apply_to_bytes(str(path), str(style), allow_comments=True), restored,
+                    )
+                    # Applying to changed data does not consume the original capture.
+                    path = self.file("original.json", raw)
+                    self.assertEqual(
+                        jsonic.cmd_apply_to_bytes(str(path), str(style), allow_comments=False), source,
+                    )
 
     def test_a_thousand_commented_records(self):
         source = b"[\n" + b",\n".join(

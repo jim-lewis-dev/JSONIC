@@ -25,12 +25,14 @@ JSONIC at runtime. Behavior and rationale live in the README and docs.
 - Run `python3 -m unittest discover -s tests -v` and `python3 examples/demo.py`.
   Generated output belongs in temporary directories.
 - Use a fresh project snapshot before changes depending on unseen local files.
-  Preserve user edits. Keep Git local; do not add remotes or push.
+  Preserve user edits. Keep development local; publication requires the user's
+  chosen GitHub destination and explicit instruction to publish.
 - Deliver changes as `JSONIC.zip`, complete replacement files plus `update.json`
   containing a plainspoken commit message and explicit removals. No backups.
 - Keep executable `update.py` and `export.py` inside the project. The updater
   uses Downloads/JSONIC.zip, commits locally, then deletes the ZIP. Refuse any
-  nonignored staged, unstaged, or untracked work before application. Never
+  nonignored staged, unstaged, or untracked work, or unfinished Git operation,
+  before application. Never
   checkpoint, stash, or reset it automatically. The user tests after the commit.
 - Export may capture dirty work and useful ignored configuration/style files
   without changing Git. Its default output is PROJECT/JSONIC-snapshot.zip,

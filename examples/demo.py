@@ -135,6 +135,8 @@ def complex_demo(work):
 
 
 def main():
+    # Match JSONIC's UTF-8 output even when Windows redirects a legacy-code-page stream.
+    sys.stdout.reconfigure(encoding="utf-8")
     with tempfile.TemporaryDirectory(prefix="jsonic-demo-") as directory:
         work = Path(directory)
         settings_demo(work)
