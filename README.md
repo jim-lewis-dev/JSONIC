@@ -98,3 +98,5 @@ Linux is exercised; native macOS/Windows and large-file throughput remain unveri
 [Tool comparison](docs/comparison.md) · [Interview demo](docs/presenting.md)
 
 For project maintenance, see [updates and snapshots](docs/updates.md).
+
+[MIT license](LICENSE). Copyright (c) 2026 Jim Lewis.
